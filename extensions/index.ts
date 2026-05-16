@@ -180,7 +180,7 @@ async function commitFlow(
   }
 }
 
-type TagAction = "add" | "delete" | "list" | "";
+type TagAction = "add" | "delete" | "push" | "list" | "";
 
 interface TagOptions {
   action: TagAction;
@@ -241,7 +241,7 @@ function parseTagArgs(args: string): TagOptions {
     remoteName: "origin",
   };
 
-  if (action && !["add", "delete", "list"].includes(action)) {
+  if (action && !["add", "delete", "push", "list"].includes(action)) {
     opts.invalid = `Unknown action: ${action}`;
     return opts;
   }
@@ -277,6 +277,7 @@ function showTagUsage(ctx: ExtensionCommandContext) {
   ctx.ui.notify([
     "Usage:",
     "/git-tag add <tag> [message...] [--push] [--remote-name <name>]",
+    "/git-tag push <tag> [--remote-name <name>]",
     "/git-tag delete <tag> [--remote] [--all] [--remote-name <name>]",
     "/git-tag list",
   ].join("\n"), "warning");
@@ -314,6 +315,26 @@ async function createTag(
   } catch (err: any) {
     ctx.ui.setStatus("git-commands", "");
     ctx.ui.notify(`Tag create failed: ${err.message || err}`, "error");
+  }
+}
+
+// ── 推送已有 tag ────────────────────────────────────────────────
+async function pushTag(
+  pi: ExtensionAPI, ctx: ExtensionCommandContext, cwd: string, opts: TagOptions
+) {
+  if (!opts.tag) {
+    showTagUsage(ctx);
+    return;
+  }
+
+  try {
+    ctx.ui.setStatus("git-commands", `Pushing tag ${opts.tag}...`);
+    const { stdout, stderr } = await pi.exec("git", ["push", opts.remoteName, opts.tag], { cwd });
+    ctx.ui.setStatus("git-commands", "");
+    ctx.ui.notify(stderr || stdout || `Pushed tag ${opts.tag} to ${opts.remoteName}`, "success");
+  } catch (err: any) {
+    ctx.ui.setStatus("git-commands", "");
+    ctx.ui.notify(`Tag push failed: ${err.message || err}`, "error");
   }
 }
 
@@ -430,6 +451,7 @@ export default async function (pi: ExtensionAPI) {
       }
 
       if (opts.action === "add") await createTag(pi, ctx, ctx.cwd, opts);
+      else if (opts.action === "push") await pushTag(pi, ctx, ctx.cwd, opts);
       else if (opts.action === "delete") await deleteTag(pi, ctx, ctx.cwd, opts);
       else if (opts.action === "list") await listTags(pi, ctx, ctx.cwd);
       else showTagUsage(ctx);

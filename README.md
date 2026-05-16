@@ -64,6 +64,7 @@ Flow:
 
 ```
 /git-tag add <tag> [message...] [--push] [--remote-name <name>]
+/git-tag push <tag> [--remote-name <name>]
 /git-tag delete <tag> [--remote] [--all] [--remote-name <name>]
 /git-tag list
 ```
@@ -73,6 +74,8 @@ Examples:
 ```
 /git-tag add v1.2.0 "release v1.2.0"
 /git-tag add v1.2.0 "release v1.2.0" --push
+/git-tag push v1.2.0
+/git-tag push v1.2.0 --remote-name upstream
 /git-tag delete v1.2.0
 /git-tag delete v1.2.0 --remote
 /git-tag delete v1.2.0 --all --remote-name upstream
@@ -83,7 +86,8 @@ Behavior:
 
 - `add` creates an annotated tag by default: `git tag -a <tag> -m <message>`.
 - If `add` has no message, an input box is shown. If still empty, the tag name is used as the message.
-- `--push` pushes the tag. Default remote is `origin`.
+- `--push` pushes the tag immediately after creation. Default remote is `origin`.
+- `push` pushes an existing local tag to the selected remote.
 - `delete` deletes only the local tag by default.
 - `--remote` deletes only the remote tag. `--all` deletes both local and remote tags.
 - Remote tag deletion requires confirmation.
