@@ -180,6 +180,198 @@ async function commitFlow(
   }
 }
 
+type TagAction = "add" | "delete" | "list" | "";
+
+interface TagOptions {
+  action: TagAction;
+  tag: string;
+  message: string;
+  push: boolean;
+  remote: boolean;
+  all: boolean;
+  remoteName: string;
+  invalid?: string;
+}
+
+// ── 解析 /git-tag 参数 ───────────────────────────────────────────
+function splitArgs(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | "" = "";
+  let escaping = false;
+
+  for (const ch of input || "") {
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+    if (ch === "\\" && quote !== "'") {
+      escaping = true;
+      continue;
+    }
+    if ((ch === '"' || ch === "'") && (!quote || quote === ch)) {
+      quote = quote ? "" : ch;
+      continue;
+    }
+    if (/\s/.test(ch) && !quote) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function parseTagArgs(args: string): TagOptions {
+  const tokens = splitArgs(args?.trim() || "");
+  const action = (tokens.shift() || "") as TagAction;
+  const opts: TagOptions = {
+    action,
+    tag: "",
+    message: "",
+    push: false,
+    remote: false,
+    all: false,
+    remoteName: "origin",
+  };
+
+  if (action && !["add", "delete", "list"].includes(action)) {
+    opts.invalid = `Unknown action: ${action}`;
+    return opts;
+  }
+
+  const positional: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--push") opts.push = true;
+    else if (token === "--remote") opts.remote = true;
+    else if (token === "--all") opts.all = true;
+    else if (token === "--remote-name") {
+      const name = tokens[++i];
+      if (!name || name.startsWith("--")) {
+        opts.invalid = "Missing value for --remote-name";
+        return opts;
+      }
+      opts.remoteName = name;
+    } else if (token.startsWith("--")) {
+      opts.invalid = `Unknown flag: ${token}`;
+      return opts;
+    } else {
+      positional.push(token);
+    }
+  }
+
+  opts.tag = positional.shift() || "";
+  opts.message = positional.join(" ").trim();
+  return opts;
+}
+
+// ── /git-tag 用法 ────────────────────────────────────────────────
+function showTagUsage(ctx: ExtensionCommandContext) {
+  ctx.ui.notify([
+    "Usage:",
+    "/git-tag add <tag> [message...] [--push] [--remote-name <name>]",
+    "/git-tag delete <tag> [--remote] [--all] [--remote-name <name>]",
+    "/git-tag list",
+  ].join("\n"), "warning");
+}
+
+// ── 新增 tag ────────────────────────────────────────────────────
+async function createTag(
+  pi: ExtensionAPI, ctx: ExtensionCommandContext, cwd: string, opts: TagOptions
+) {
+  if (!opts.tag) {
+    showTagUsage(ctx);
+    return;
+  }
+
+  let message = opts.message;
+  if (!message) {
+    const input = await ctx.ui.input(`Enter tag message for ${opts.tag}`);
+    message = input?.trim() || opts.tag;
+  }
+
+  try {
+    const { stdout, stderr } = await pi.exec("git", ["tag", "-a", opts.tag, "-m", message], { cwd });
+    const tagOutput = (stderr || stdout || `Created tag ${opts.tag}`).trim();
+
+    if (opts.push) {
+      ctx.ui.setStatus("git-commands", `Pushing tag ${opts.tag}...`);
+      const pushed = await pi.exec("git", ["push", opts.remoteName, opts.tag], { cwd });
+      ctx.ui.setStatus("git-commands", "");
+      ctx.ui.notify([tagOutput, pushed.stderr || pushed.stdout || `Pushed tag ${opts.tag} to ${opts.remoteName}`]
+        .filter(Boolean).join("\n"), "success");
+      return;
+    }
+
+    ctx.ui.notify(tagOutput, "success");
+  } catch (err: any) {
+    ctx.ui.setStatus("git-commands", "");
+    ctx.ui.notify(`Tag create failed: ${err.message || err}`, "error");
+  }
+}
+
+// ── 删除 tag ────────────────────────────────────────────────────
+async function deleteTag(
+  pi: ExtensionAPI, ctx: ExtensionCommandContext, cwd: string, opts: TagOptions
+) {
+  if (!opts.tag) {
+    showTagUsage(ctx);
+    return;
+  }
+
+  const deleteLocal = !opts.remote || opts.all;
+  const deleteRemote = opts.remote || opts.all;
+  const messages: string[] = [];
+
+  try {
+    if (deleteLocal) {
+      const { stdout, stderr } = await pi.exec("git", ["tag", "-d", opts.tag], { cwd });
+      messages.push((stderr || stdout || `Deleted local tag ${opts.tag}`).trim());
+    }
+
+    if (deleteRemote) {
+      const choice = await ctx.ui.select(
+        `Delete remote tag ${opts.tag} from ${opts.remoteName}?`,
+        ["✓ Delete remote tag", "✕ Cancel"]
+      );
+      if (!choice || choice.includes("Cancel")) {
+        messages.push("Remote tag delete cancelled");
+        ctx.ui.notify(messages.filter(Boolean).join("\n"), "warning");
+        return;
+      }
+
+      ctx.ui.setStatus("git-commands", `Deleting remote tag ${opts.tag}...`);
+      const { stdout, stderr } = await pi.exec(
+        "git", ["push", opts.remoteName, `:refs/tags/${opts.tag}`], { cwd }
+      );
+      ctx.ui.setStatus("git-commands", "");
+      messages.push((stderr || stdout || `Deleted remote tag ${opts.tag} from ${opts.remoteName}`).trim());
+    }
+
+    ctx.ui.notify(messages.filter(Boolean).join("\n") || `Deleted tag ${opts.tag}`, "success");
+  } catch (err: any) {
+    ctx.ui.setStatus("git-commands", "");
+    ctx.ui.notify(`Tag delete failed: ${err.message || err}`, "error");
+  }
+}
+
+// ── 列出 tag ────────────────────────────────────────────────────
+async function listTags(pi: ExtensionAPI, ctx: ExtensionCommandContext, cwd: string) {
+  try {
+    const { stdout } = await pi.exec("git", ["tag", "--list"], { cwd });
+    ctx.ui.notify(stdout.trim() || "No tags", "info");
+  } catch (err: any) {
+    ctx.ui.notify(`Tag list failed: ${err.message || err}`, "error");
+  }
+}
+
 // ── 清理旧单文件扩展（如存在） ──────────────────────────────────
 async function cleanupOldFile() {
   const fs = await import("node:fs");
@@ -224,6 +416,23 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.setStatus("git-commands", "");
         ctx.ui.notify(`Push failed: ${err.message || err}`, "error");
       }
+    },
+  });
+
+  pi.registerCommand("git-tag", {
+    description: "Create, delete, and list git tags",
+    handler: async (args, ctx) => {
+      const opts = parseTagArgs(args);
+      if (opts.invalid || !opts.action) {
+        if (opts.invalid) ctx.ui.notify(opts.invalid, "warning");
+        showTagUsage(ctx);
+        return;
+      }
+
+      if (opts.action === "add") await createTag(pi, ctx, ctx.cwd, opts);
+      else if (opts.action === "delete") await deleteTag(pi, ctx, ctx.cwd, opts);
+      else if (opts.action === "list") await listTags(pi, ctx, ctx.cwd);
+      else showTagUsage(ctx);
     },
   });
 }

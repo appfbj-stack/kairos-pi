@@ -1,10 +1,10 @@
 # pi-git-commands
 
-Pi agent 扩展，注册 `/git-commit` 和 `/git-push` 命令。
+Pi agent extension that registers `/git-commit`, `/git-push`, and `/git-tag` commands.
 
-复用当前对话的 LLM 分析 `git diff`，自动生成符合 [Conventional Commits](https://www.conventionalcommits.org/) 规范的提交信息。
+It reuses the current conversation model to analyze `git diff` and generate [Conventional Commits](https://www.conventionalcommits.org/) messages. It also supports Git tag creation, deletion, and listing.
 
-## 安装
+## Installation
 
 ```bash
 # npm
@@ -14,31 +14,31 @@ pi install npm:pi-git-commands
 pi install git:github.com/helloHupc/pi-git-commands
 ```
 
-或手动放本地：
+Or install manually:
 
 ```bash
 mkdir -p ~/.pi/agent/extensions/git-commands
 cp extensions/*.ts ~/.pi/agent/extensions/git-commands/
 ```
 
-安装后 `/reload` 加载。
+Run `/reload` after installation.
 
-## 用法
+## Usage
 
 ### `/git-commit`
 
 ```
-/git-commit              默认英文 LLM 生成
-/git-commit zh            中文 LLM 生成
-/git-commit fix: typo    使用自定义 message 直接提交
+/git-commit              Generate an English commit message with LLM
+/git-commit zh            Generate a Chinese commit message with LLM
+/git-commit fix: typo    Commit directly with a custom message
 ```
 
-交互流程：
+Flow:
 
-1. `git add .` 暂存所有改动
-2. LLM 分析 diff 生成提交信息（底部状态栏显示"Analyzing diff..."）
-3. 展示前 3 行预览
-4. 选择：
+1. Run `git add .` to stage all changes.
+2. Analyze staged diff with LLM and generate a commit message. Status bar shows `Analyzing diff...`.
+3. Show first 3 lines as preview.
+4. Choose an action:
 
    ```
    feat(auth): add login page
@@ -48,47 +48,76 @@ cp extensions/*.ts ~/.pi/agent/extensions/git-commands/
      ✕ Cancel
    ```
 
-   - **Accept** — 使用生成的 message 提交
-   - **Custom** — 弹出输入框自定义
-   - **Cancel** — 取消
+   - **Accept** — commit with generated message.
+   - **Custom** — open input box for a custom message.
+   - **Cancel** — cancel commit.
 
 ### `/git-push`
 
 ```
-/git-push              同上 + 自动 git push
-/git-push zh            中文模式 + push
-/git-push deploy: v1.2  自定义 message + push
+/git-push              Same as /git-commit, then run git push
+/git-push zh            Chinese mode, then push
+/git-push deploy: v1.2  Custom message, then push
 ```
 
-## 语言
+### `/git-tag`
 
-默认**英文**。切中文：
+```
+/git-tag add <tag> [message...] [--push] [--remote-name <name>]
+/git-tag delete <tag> [--remote] [--all] [--remote-name <name>]
+/git-tag list
+```
+
+Examples:
+
+```
+/git-tag add v1.2.0 "release v1.2.0"
+/git-tag add v1.2.0 "release v1.2.0" --push
+/git-tag delete v1.2.0
+/git-tag delete v1.2.0 --remote
+/git-tag delete v1.2.0 --all --remote-name upstream
+/git-tag list
+```
+
+Behavior:
+
+- `add` creates an annotated tag by default: `git tag -a <tag> -m <message>`.
+- If `add` has no message, an input box is shown. If still empty, the tag name is used as the message.
+- `--push` pushes the tag. Default remote is `origin`.
+- `delete` deletes only the local tag by default.
+- `--remote` deletes only the remote tag. `--all` deletes both local and remote tags.
+- Remote tag deletion requires confirmation.
+- `--remote-name <name>` selects a remote, for example `upstream`.
+
+## Language
+
+Default language is **English**. Switch to Chinese:
 
 ```bash
-# 环境变量（单次生效）
+# Environment variable, one-shot
 GIT_COMMANDS_LANG=zh
 
-# 或永久设置：~/.pi/agent/settings.json
+# Or persistent config: ~/.pi/agent/settings.json
 {
   "gitCommandsLanguage": "zh"
 }
 ```
 
-或在命令中临时切换：`/git-commit zh`。
+Or switch per command: `/git-commit zh`.
 
-## 回退
+## Fallback
 
-LLM 不可用时，自动回退到启发式生成（基于文件变更类型和目录推断 type/scope）。
+If LLM is unavailable, the extension falls back to heuristic message generation based on changed file types and directories.
 
-## 文件结构
+## File structure
 
 ```
 ~/.pi/agent/extensions/git-commands/
-├── index.ts       # 命令注册、LLM 调用、交互流程
-└── prompts.ts     # 中/英文提示词模板
+├── index.ts       # Command registration, LLM calls, interactive flow, tag operations
+└── prompts.ts     # English/Chinese prompt templates
 ```
 
-## 要求
+## Requirements
 
 - Pi agent ≥ 0.73
-- 已配置模型 Provider（复用当前对话的模型和 API key）
+- Configured model provider. The extension reuses the current conversation model and API key.
