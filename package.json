@@ -4,7 +4,7 @@
   "description": "Pi agent extension: /git-commit and /git-push with LLM-generated Conventional Commits messages",
   "keywords": ["pi-package", "pi-extension", "git", "commit", "conventional-commits"],
   "license": "MIT",
-  "author": "",
+  "author": "helloHupc <985708024@qq.com>",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*"
