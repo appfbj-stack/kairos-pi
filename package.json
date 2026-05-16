@@ -1,0 +1,19 @@
+{
+  "name": "pi-git-commands",
+  "version": "1.0.0",
+  "description": "Pi agent extension: /git-commit and /git-push with LLM-generated Conventional Commits messages",
+  "keywords": ["pi-package", "pi-extension", "git", "commit", "conventional-commits"],
+  "license": "MIT",
+  "author": "",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/helloHupc/pi-git-commands"
+  }
+}
