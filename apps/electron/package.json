@@ -1,0 +1,41 @@
+{
+  "name": "@kairos/electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kairós Desktop Alves — shell desktop Electron + React + Vite + Tailwind + Shadcn UI.",
+  "main": "dist/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c blue,green \"vite\" \"wait-on http://localhost:5173 && tsc -p tsconfig.node.json && cross-env NODE_ENV=development electron dist/main/index.js\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.node.json && cross-env NODE_ENV=development electron dist/main/index.js",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.node.json",
+    "build": "pnpm build:renderer && pnpm build:main",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "package": "pnpm build && electron-builder --win",
+    "package:dir": "pnpm build && electron-builder --win --dir"
+  },
+  "dependencies": {
+    "@kairos/agent": "workspace:*",
+    "@kairos/core": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-updater": "^6.3.9",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "wait-on": "^8.0.1"
+  }
+}

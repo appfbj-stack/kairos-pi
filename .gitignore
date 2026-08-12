@@ -1,1 +1,64 @@
-plan/
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build outputs
+dist/
+dist-renderer/
+build/
+release/
+out/
+*.tsbuildinfo
+
+# environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# testing
+coverage/
+.nyc_output/
+
+# electron
+.cache/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# pi-agent session data
+.kairos/
+*.kairos
+kairos.db
+kairos.db-journal
+kairos.db-wal
+kairos.db-shm
+
+# temp
+tmp/
+temp/
+.tmp/
+
+# install/rebuild logs (gerados durante setup, não versionar)
+*.log
+!.gitkeep
