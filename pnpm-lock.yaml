@@ -32,6 +32,24 @@ importers:
       '@kairos/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@kairos/extension-documents':
+        specifier: workspace:*
+        version: link:../../packages/extensions/kairos-documents
+      '@kairos/extension-files':
+        specifier: workspace:*
+        version: link:../../packages/extensions/kairos-files
+      '@kairos/extension-images':
+        specifier: workspace:*
+        version: link:../../packages/extensions/kairos-images
+      '@kairos/extension-pdf-create':
+        specifier: workspace:*
+        version: link:../../packages/extensions/kairos-pdf-create
+      '@kairos/extension-spreadsheets':
+        specifier: workspace:*
+        version: link:../../packages/extensions/kairos-spreadsheets
+      '@kairos/extension-video':
+        specifier: workspace:*
+        version: link:../../packages/extensions/kairos-video
       react:
         specifier: ^18.3.1
         version: 18.3.1

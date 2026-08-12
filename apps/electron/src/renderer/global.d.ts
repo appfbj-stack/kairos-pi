@@ -1,7 +1,7 @@
 /**
  * Tipos da API exposta pelo preload no `window.kairos`.
  *
- * Sprint 0: só `ping`. Sprint 1 expande.
+ * Sprint 1.2: API completa (ping, start, send, onAgentEvent, stop, provider, listTools).
  */
 
 import type { KairosAPI } from "../preload/index.js";

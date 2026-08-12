@@ -19,6 +19,12 @@
   "dependencies": {
     "@kairos/agent": "workspace:*",
     "@kairos/core": "workspace:*",
+    "@kairos/extension-documents": "workspace:*",
+    "@kairos/extension-files": "workspace:*",
+    "@kairos/extension-images": "workspace:*",
+    "@kairos/extension-pdf-create": "workspace:*",
+    "@kairos/extension-spreadsheets": "workspace:*",
+    "@kairos/extension-video": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
