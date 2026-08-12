@@ -12,3 +12,9 @@ export { runAgentLoop } from "./loop.js";
 export { ToolRegistry } from "./tools/registry.js";
 export type { Tool, ToolContext } from "./tools/registry.js";
 export { Permissions } from "./permissions/index.js";
+export {
+  type Extension,
+  normalizeExtension,
+  registerExtension,
+  registerExtensions,
+} from "./extensions/loader.js";

@@ -30,6 +30,7 @@
       "electron",
       "esbuild",
       "@google/genai",
+      "ffmpeg-static",
       "protobufjs"
     ]
   },

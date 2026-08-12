@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "packages/extensions/*"
   # "extensions" (root) is intentionally NOT a workspace member.
   # It is kept as a reference of the pi-git-commands API contract.
   # See docs/BRIEFING-PARA-MINIMAX.md section 1.
