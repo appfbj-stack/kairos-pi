@@ -1,11 +1,11 @@
 /**
  * SQLite wrapper — kairos.db local.
  *
- * Schema inicial (Sprint 1):
- *   - conversations (id, created_at, updated_at, title)
- *   - messages     (id, conversation_id, role, content, created_at)
- *   - settings     (key, value)
- *   - logs         (id, level, message, context, created_at)
+ * Schema (Sprint 1.4):
+ *   conversations (id, created_at, updated_at, title)
+ *   messages     (id, conversation_id, role, content, attachments, tool_name, created_at)
+ *   settings     (key, value)
+ *   logs         (id, level, message, context, created_at)
  */
 
 import Database from "better-sqlite3";
@@ -26,7 +26,7 @@ export function openDatabase(workspaceDir: string): KairósDB {
   raw.pragma("journal_mode = WAL");
   raw.pragma("foreign_keys = ON");
 
-  // Schema mínimo — Sprint 1 expande.
+  // Schema
   raw.exec(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
@@ -40,6 +40,8 @@ export function openDatabase(workspaceDir: string): KairósDB {
       conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      attachments TEXT,
+      tool_name TEXT,
       created_at INTEGER NOT NULL
     );
 
@@ -57,6 +59,7 @@ export function openDatabase(workspaceDir: string): KairósDB {
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
   `);
 
   return {

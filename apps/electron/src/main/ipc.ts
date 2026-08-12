@@ -14,6 +14,7 @@ import {
   setProvider,
   getProvider,
   getDebugInfo,
+  getStore,
 } from "./agent-instance.js";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
 import { logger } from "@kairos/core";
@@ -140,6 +141,44 @@ export function registerIpcHandlers(): void {
       })),
     };
   });
+
+  // ── Conversations (Sprint 1.4) ─────────────────────────────────
+
+  ipcMain.handle("conversations:list", async () => {
+    const store = getStore();
+    return store.listConversations(100);
+  });
+
+  ipcMain.handle("conversations:create", async (_event, title?: string) => {
+    const store = getStore();
+    return store.createConversation(title);
+  });
+
+  ipcMain.handle(
+    "conversations:get",
+    async (_event, id: string) => {
+      const store = getStore();
+      const conv = store.getConversation(id);
+      if (!conv) return null;
+      const messages = store.listMessages(id);
+      return { conversation: conv, messages };
+    }
+  );
+
+  ipcMain.handle("conversations:delete", async (_event, id: string) => {
+    const store = getStore();
+    store.deleteConversation(id);
+    return { ok: true };
+  });
+
+  ipcMain.handle(
+    "conversations:rename",
+    async (_event, id: string, title: string) => {
+      const store = getStore();
+      store.updateTitle(id, title);
+      return { ok: true };
+    }
+  );
 
   // Envia mensagem — retorna stream de eventos
   ipcMain.handle(

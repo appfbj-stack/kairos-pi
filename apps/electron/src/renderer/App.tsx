@@ -1,12 +1,20 @@
 /**
- * Kairós Desktop Alves — chat UI funcional com anexos.
+ * Kairós Desktop Alves — chat UI com sidebar de conversas.
  *
- * Sprint 1.3: botão 📎 funcional, file dialog, attachments inline.
+ * Sprint 1.4: persistência. Sidebar lista conversas, click carrega histórico,
+ * botão "+" cria nova.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
-import type { Attachment, AttachmentSummary } from "../preload/index.js";
+import type { Attachment } from "../preload/index.js";
+
+interface Conversation {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  title: string | null;
+}
 
 interface Message {
   id: string;
@@ -20,33 +28,68 @@ interface Message {
 const SESSION_ID = "session-" + Date.now();
 
 export function App() {
+  const [sessionId, setSessionId] = useState<string>(SESSION_ID);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
-  const [pendingAttachments, setPendingAttachments] = useState<AttachmentSummary[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<{ name: string; size: number; path: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [provider, setProviderState] = useState<ProviderConfig | null>(null);
   const [toolCount, setToolCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Init
+  // Init: provider, lista conversas, sessão inicial
   useEffect(() => {
     void (async () => {
       const p = await window.kairos!.getProvider();
       setProviderState(p);
 
-      const session = await window.kairos!.start(SESSION_ID);
+      const convs = await window.kairos!.conversations.list();
+      setConversations(convs);
+
+      // Cria primeira conversa se não tem nenhuma
+      let currentConv = convs[0];
+      if (!currentConv) {
+        currentConv = await window.kairos!.conversations.create("Nova conversa");
+        setConversations([currentConv]);
+      }
+      setSessionId(currentConv.id);
+
+      const session = await window.kairos!.start(currentConv.id);
       setToolCount(session.toolCount);
+
+      // Carrega mensagens da conversa
+      const data = await window.kairos!.conversations.get(currentConv.id);
+      if (data) {
+        setMessages(
+          data.messages.map((m) => ({
+            id: m.id,
+            role: m.role as Message["role"],
+            content: m.content,
+            toolName: m.toolName ?? undefined,
+            attachments: m.attachments ? JSON.parse(m.attachments) : undefined,
+            ts: m.createdAt,
+          }))
+        );
+      }
+
       addSystemMessage(
-        `Sessão iniciada. ${session.toolCount} tools. Provider: ${p.provider} / ${p.modelId}`
+        `Kairós pronto. ${session.toolCount} tools. Provider: ${p.provider} / ${p.modelId}.`
       );
     })();
 
-    const off = window.kairos!.onAgentEvent(SESSION_ID, (event: AgentEvent) => {
+    return () => {};
+  }, []);
+
+  // Subscribe a eventos do agent quando sessionId muda
+  useEffect(() => {
+    const off = window.kairos!.onAgentEvent(sessionId, (event: AgentEvent) => {
       handleAgentEvent(event);
     });
     return () => off();
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -77,13 +120,7 @@ export function App() {
         case "tool:call":
           return [
             ...m,
-            {
-              id: crypto.randomUUID(),
-              role: "tool",
-              content: `🔧 ${event.tool}`,
-              toolName: event.tool,
-              ts: Date.now(),
-            },
+            { id: crypto.randomUUID(), role: "tool", content: `🔧 ${event.tool}`, toolName: event.tool, ts: Date.now() },
           ];
         case "tool:result":
           return [
@@ -115,6 +152,41 @@ export function App() {
     });
   }
 
+  async function handleNewConversation() {
+    const conv = await window.kairos!.conversations.create("Nova conversa");
+    setConversations((cs) => [conv, ...cs]);
+    setSessionId(conv.id);
+    setMessages([]);
+  }
+
+  async function handleSwitchConversation(id: string) {
+    if (busy) return;
+    setSessionId(id);
+    const data = await window.kairos!.conversations.get(id);
+    if (data) {
+      setMessages(
+        data.messages.map((m) => ({
+          id: m.id,
+          role: m.role as Message["role"],
+          content: m.content,
+          toolName: m.toolName ?? undefined,
+          attachments: m.attachments ? JSON.parse(m.attachments) : undefined,
+          ts: m.createdAt,
+        }))
+      );
+    }
+  }
+
+  async function handleDeleteConversation(id: string) {
+    if (!window.confirm("Excluir esta conversa?")) return;
+    await window.kairos!.conversations.delete(id);
+    setConversations((cs) => cs.filter((c) => c.id !== id));
+    if (id === sessionId && conversations.length > 1) {
+      const next = conversations.find((c) => c.id !== id);
+      if (next) await handleSwitchConversation(next.id);
+    }
+  }
+
   async function handleAttach() {
     if (busy) return;
     const result = await window.kairos!.openFileDialog();
@@ -132,7 +204,6 @@ export function App() {
     setDraft("");
     setBusy(true);
 
-    // Lê conteúdo dos anexos via IPC
     let attachments: Attachment[] = [];
     if (pendingAttachments.length > 0) {
       try {
@@ -154,18 +225,23 @@ export function App() {
         ts: Date.now(),
       },
     ]);
+    const pending = [...pendingAttachments];
     setPendingAttachments([]);
 
     try {
-      await window.kairos!.send(SESSION_ID, text, attachments);
+      await window.kairos!.send(sessionId, text, attachments);
+      // Atualiza lista (ordem)
+      const convs = await window.kairos!.conversations.list();
+      setConversations(convs);
     } catch (err) {
       addSystemMessage(`Erro: ${err instanceof Error ? err.message : String(err)}`);
       setBusy(false);
     }
+    void pending; // silence unused
   }
 
   async function handleStop() {
-    await window.kairos!.stop(SESSION_ID);
+    await window.kairos!.stop(sessionId);
   }
 
   async function handleProviderChange(next: ProviderConfig) {
@@ -174,153 +250,214 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-900 text-slate-100">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-lg bg-emerald-500" aria-hidden="true" />
-          <div>
-            <h1 className="text-lg font-semibold">Kairós Desktop Alves</h1>
-            {provider && (
-              <p className="text-xs text-slate-400">
-                {provider.provider} · {provider.modelId} · {toolCount} tools
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {busy && (
+    <div className="flex h-screen bg-slate-900 text-slate-100">
+      {/* Sidebar */}
+      {sidebarOpen && (
+        <aside className="flex w-64 flex-col border-r border-slate-800 bg-slate-950">
+          <div className="border-b border-slate-800 px-4 py-3">
             <button
               type="button"
-              onClick={handleStop}
-              className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium hover:bg-red-500"
+              onClick={handleNewConversation}
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700"
             >
-              ⏹ Parar
+              + Nova conversa
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowSettings(!showSettings)}
-            className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-            aria-label="Configurações"
-          >
-            ⚙️
-          </button>
-        </div>
-      </header>
-
-      {/* Settings */}
-      {showSettings && provider && (
-        <div className="border-b border-slate-800 bg-slate-950 px-6 py-4">
-          <h2 className="mb-2 text-sm font-semibold text-slate-300">Provider</h2>
-          <div className="grid grid-cols-3 gap-3">
-            <select
-              value={provider.provider}
-              onChange={(e) => handleProviderChange({ ...provider, provider: e.target.value as ProviderConfig["provider"] })}
-              className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-            >
-              <option value="openrouter">openrouter</option>
-              <option value="openai">openai</option>
-              <option value="anthropic">anthropic</option>
-              <option value="minimax">minimax</option>
-            </select>
-            <input
-              type="text"
-              value={provider.modelId}
-              onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
-              placeholder="model ID"
-              className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-            />
-            <input
-              type="text"
-              value={provider.apiKey ?? ""}
-              onChange={(e) => handleProviderChange({ ...provider, apiKey: e.target.value || undefined })}
-              placeholder="API key"
-              className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-            />
           </div>
-        </div>
-      )}
-
-      {/* Conversation */}
-      <main className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto max-w-3xl space-y-3">
-          {messages.length === 0 && (
-            <div className="py-12 text-center text-slate-500">
-              <p className="text-2xl">O que você quer que eu faça?</p>
-              <p className="mt-2 text-sm">
-                {toolCount} tools — arquivos, planilhas, PDFs, Word, imagens, vídeo.
-              </p>
-              <p className="mt-1 text-xs">Anexe arquivos pelo botão 📎 abaixo.</p>
-            </div>
-          )}
-          {messages.map((m) => (
-            <MessageBubble key={m.id} msg={m} />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-      </main>
-
-      {/* Pending attachments */}
-      {pendingAttachments.length > 0 && (
-        <div className="border-t border-slate-800 bg-slate-950 px-6 py-2">
-          <div className="mx-auto flex max-w-3xl flex-wrap gap-2">
-            {pendingAttachments.map((a, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs"
-              >
-                <span>📎 {a.name}</span>
-                <span className="text-slate-500">({formatSize(a.size)})</span>
-                <button
-                  type="button"
-                  onClick={() => removePendingAttachment(i)}
-                  className="text-slate-500 hover:text-red-400"
+          <div className="flex-1 overflow-y-auto">
+            {conversations.length === 0 ? (
+              <p className="p-4 text-xs text-slate-500 italic">Nenhuma conversa</p>
+            ) : (
+              conversations.map((c) => (
+                <div
+                  key={c.id}
+                  className={`group flex cursor-pointer items-center justify-between border-b border-slate-900 px-3 py-2 text-sm ${
+                    c.id === sessionId ? "bg-slate-800" : "hover:bg-slate-900"
+                  }`}
+                  onClick={() => void handleSwitchConversation(c.id)}
                 >
-                  ✕
-                </button>
-              </div>
-            ))}
+                  <div className="flex-1 truncate">
+                    <p className="truncate">{c.title ?? "Sem título"}</p>
+                    <p className="text-xs text-slate-500">
+                      {new Date(c.updatedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeleteConversation(c.id);
+                    }}
+                    className="opacity-0 transition-opacity group-hover:opacity-100 text-slate-500 hover:text-red-400"
+                    aria-label="Excluir"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))
+            )}
           </div>
-        </div>
+        </aside>
       )}
 
-      {/* Input */}
-      <footer className="border-t border-slate-800 px-6 py-4">
-        <form
-          className="mx-auto flex max-w-3xl items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void handleSend();
-          }}
-        >
-          <button
-            type="button"
-            onClick={handleAttach}
-            className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
-            aria-label="Anexar arquivo"
-            title="Anexar arquivo"
-            disabled={busy}
+      {/* Main */}
+      <div className="flex flex-1 flex-col">
+        {/* Header */}
+        <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="rounded-md p-1 text-slate-400 hover:bg-slate-800"
+              aria-label="Toggle sidebar"
+            >
+              ☰
+            </button>
+            <div className="h-8 w-8 rounded-lg bg-emerald-500" aria-hidden="true" />
+            <div>
+              <h1 className="text-lg font-semibold">Kairós Desktop Alves</h1>
+              {provider && (
+                <p className="text-xs text-slate-400">
+                  {provider.provider} · {provider.modelId} · {toolCount} tools
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {busy && (
+              <button
+                type="button"
+                onClick={handleStop}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium hover:bg-red-500"
+              >
+                ⏹ Parar
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowSettings(!showSettings)}
+              className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              aria-label="Configurações"
+            >
+              ⚙️
+            </button>
+          </div>
+        </header>
+
+        {/* Settings */}
+        {showSettings && provider && (
+          <div className="border-b border-slate-800 bg-slate-950 px-6 py-4">
+            <h2 className="mb-2 text-sm font-semibold text-slate-300">Provider</h2>
+            <div className="grid grid-cols-3 gap-3">
+              <select
+                value={provider.provider}
+                onChange={(e) =>
+                  handleProviderChange({ ...provider, provider: e.target.value as ProviderConfig["provider"] })
+                }
+                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+              >
+                <option value="openrouter">openrouter</option>
+                <option value="openai">openai</option>
+                <option value="anthropic">anthropic</option>
+                <option value="minimax">minimax</option>
+              </select>
+              <input
+                type="text"
+                value={provider.modelId}
+                onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
+                placeholder="model ID"
+                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+              />
+              <input
+                type="text"
+                value={provider.apiKey ?? ""}
+                onChange={(e) =>
+                  handleProviderChange({ ...provider, apiKey: e.target.value || undefined })
+                }
+                placeholder="API key"
+                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Conversation */}
+        <main className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto max-w-3xl space-y-3">
+            {messages.length === 0 && (
+              <div className="py-12 text-center text-slate-500">
+                <p className="text-2xl">O que você quer que eu faça?</p>
+                <p className="mt-2 text-sm">
+                  {toolCount} tools — arquivos, planilhas, PDFs, Word, imagens, vídeo.
+                </p>
+              </div>
+            )}
+            {messages.map((m) => (
+              <MessageBubble key={m.id} msg={m} />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        </main>
+
+        {/* Pending attachments */}
+        {pendingAttachments.length > 0 && (
+          <div className="border-t border-slate-800 bg-slate-950 px-6 py-2">
+            <div className="mx-auto flex max-w-3xl flex-wrap gap-2">
+              {pendingAttachments.map((a, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs"
+                >
+                  <span>📎 {a.name}</span>
+                  <span className="text-slate-500">({formatSize(a.size)})</span>
+                  <button
+                    type="button"
+                    onClick={() => removePendingAttachment(i)}
+                    className="text-slate-500 hover:text-red-400"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Input */}
+        <footer className="border-t border-slate-800 px-6 py-4">
+          <form
+            className="mx-auto flex max-w-3xl items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleSend();
+            }}
           >
-            📎
-          </button>
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="O que você quer fazer?"
-            className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-4 py-2 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
-            disabled={busy}
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-emerald-500 px-4 py-2 font-semibold text-slate-900 hover:bg-emerald-400 disabled:opacity-50"
-            disabled={busy || (!draft.trim() && pendingAttachments.length === 0)}
-          >
-            {busy ? "..." : "➤"}
-          </button>
-        </form>
-      </footer>
+            <button
+              type="button"
+              onClick={handleAttach}
+              className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
+              aria-label="Anexar arquivo"
+              disabled={busy}
+            >
+              📎
+            </button>
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="O que você quer fazer?"
+              className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-4 py-2 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
+              disabled={busy}
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-emerald-500 px-4 py-2 font-semibold text-slate-900 hover:bg-emerald-400 disabled:opacity-50"
+              disabled={busy || (!draft.trim() && pendingAttachments.length === 0)}
+            >
+              {busy ? "..." : "➤"}
+            </button>
+          </form>
+        </footer>
+      </div>
     </div>
   );
 }

@@ -13,10 +13,16 @@ import { runLlmLoop, readProviderConfigFromEnv } from "./llm/index.js";
 
 export async function* runAgentLoop(
   agent: Agent,
-  userMessage: string
+  userMessage: string,
+  options: {
+    initialMessages?: { role: "user" | "assistant"; content: string }[];
+  } = {}
 ): AsyncIterable<AgentEvent> {
   // Lê config do env. Sprint 1+: ler de settings persistido no SQLite.
   const provider = readProviderConfigFromEnv();
 
-  yield* runLlmLoop(agent, userMessage, { provider });
+  yield* runLlmLoop(agent, userMessage, {
+    provider,
+    initialMessages: options.initialMessages,
+  });
 }

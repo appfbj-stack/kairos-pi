@@ -7,5 +7,6 @@
  */
 
 export * from "./db/index.js";
+export * from "./db/conversations.js";
 export * from "./i18n/index.js";
 export * from "./logger/index.js";

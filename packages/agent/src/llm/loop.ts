@@ -37,7 +37,11 @@ const MAX_TOOL_ITERATIONS = 25;
 export async function* runLlmLoop(
   agent: Agent,
   userMessage: string,
-  options: { systemPrompt?: string; provider: ProviderConfig } = {
+  options: {
+    systemPrompt?: string;
+    provider: ProviderConfig;
+    initialMessages?: { role: "user" | "assistant"; content: string }[];
+  } = {
     provider: { provider: "openrouter", modelId: "anthropic/claude-3.5-sonnet" },
   }
 ): AsyncIterable<AgentEvent> {
@@ -47,14 +51,41 @@ export async function* runLlmLoop(
   // 1. Constrói tools no formato do pi-ai (typebox)
   const tools: PiTool[] = agent.tools.list().map(toKairosToolToPiTool);
 
-  // 2. Mensagem inicial do user
+  // 2. Carrega histórico (se houver) + mensagem do user
+  const messages: Message[] = [];
+
+  if (options.initialMessages && options.initialMessages.length > 0) {
+    for (const m of options.initialMessages) {
+      if (m.role === "user") {
+        messages.push({
+          role: "user",
+          content: m.content,
+          timestamp: Date.now(),
+        });
+      } else {
+        // Mensagem assistant do histórico — constrói com campos obrigatórios vazios
+        // (será ignorado pelo pi-ai, mas é necessário pra satisfazer o tipo discriminado)
+        const stub: AssistantMessage = {
+          role: "assistant",
+          content: [{ type: "text", text: m.content }],
+          api: "openai-completions", // placeholder
+          provider: "openai",
+          model: "history",
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: "stop",
+          timestamp: Date.now(),
+        };
+        messages.push(stub);
+      }
+    }
+  }
+
   const userMsg: UserMessage = {
     role: "user",
     content: userMessage,
     timestamp: Date.now(),
   };
-
-  const messages: Message[] = [userMsg];
+  messages.push(userMsg);
 
   let iteration = 0;
   while (iteration++ < MAX_TOOL_ITERATIONS) {

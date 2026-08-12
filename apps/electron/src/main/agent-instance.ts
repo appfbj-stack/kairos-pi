@@ -1,8 +1,10 @@
 /**
  * Agent singleton — gerencia o Agent do Kairós no main process.
  *
- * Cria 1 Agent por sessão de chat, carrega extensions, persiste no SQLite.
- * O renderer conversa com ele via IPC.
+ * Sprint 1.4: persistência de conversas no SQLite.
+ * Cada sessão tem uma Conversation única. Mensagens são salvas após o user
+ * enviar e após cada resposta do agent. Histórico é carregado quando o user
+ * retoma uma conversa.
  */
 
 import path from "node:path";
@@ -22,9 +24,15 @@ import kairosSpreadsheets from "@kairos/extension-spreadsheets";
 import kairosPdfCreate from "@kairos/extension-pdf-create";
 import kairosDocuments from "@kairos/extension-documents";
 import kairosImages from "@kairos/extension-images";
-import { openDatabase, logger } from "@kairos/core";
+import { openDatabase, ConversationStore, logger, type KairósDB } from "@kairos/core";
 
-let agent: Agent | null = null;
+interface AgentEntry {
+  agent: Agent;
+  store: ConversationStore;
+  db: KairósDB;
+}
+
+let entry: AgentEntry | null = null;
 let currentSessionId: string | null = null;
 let provider: ProviderConfig = readProviderConfigFromEnv();
 
@@ -32,20 +40,30 @@ function workspaceDir(): string {
   return path.join(app.getPath("userData"), "kairos-workspace");
 }
 
+/** Garante DB aberto e store disponível. */
+function ensureStore(): { db: KairósDB; store: ConversationStore } {
+  const workspace = workspaceDir();
+  const db = openDatabase(workspace);
+  return { db, store: new ConversationStore(db.raw) };
+}
+
 /** Cria (ou retorna) o Agent. Idempotente. */
 export function getAgent(sessionId: string): Agent {
-  if (agent && currentSessionId === sessionId) return agent;
+  if (entry && currentSessionId === sessionId) return entry.agent;
 
   logger.info({ sessionId, provider }, "Criando Agent");
 
-  // Workspace dedicado por usuário
-  const workspace = workspaceDir();
-  const db = openDatabase(workspace);
-  logger.info({ workspace }, "Database aberto");
+  const { db, store } = ensureStore();
 
-  agent = new Agent(sessionId, {
+  // Cria a conversa se não existe
+  if (!store.getConversation(sessionId)) {
+    store.createConversation(sessionId);
+    logger.info({ sessionId }, "Conversa criada");
+  }
+
+  const agent = new Agent(sessionId, {
     model: buildModel(provider),
-    workspaceDir: workspace,
+    workspaceDir: workspaceDir(),
     enabledExtensions: [
       "kairos-files",
       "kairos-spreadsheets",
@@ -57,7 +75,6 @@ export function getAgent(sessionId: string): Agent {
     locale: "pt-BR",
   });
 
-  // Carrega extensions no ToolRegistry
   registerExtension(agent.tools, kairosFiles);
   registerExtension(agent.tools, kairosSpreadsheets);
   registerExtension(agent.tools, kairosPdfCreate);
@@ -65,19 +82,71 @@ export function getAgent(sessionId: string): Agent {
   registerExtension(agent.tools, kairosImages);
   registerExtension(agent.tools, kairosVideo);
 
-  logger.info(
-    { toolCount: agent.tools.list().length },
-    `${agent.tools.list().length} tools registradas`
-  );
-
+  entry = { agent, store, db };
   currentSessionId = sessionId;
   return agent;
 }
 
-/** Processa uma mensagem do user, retornando AsyncIterable<AgentEvent>. */
-export async function* handleUserMessage(sessionId: string, userMessage: string) {
+/** Retorna store de conversas. */
+export function getStore(): ConversationStore {
+  if (!entry) ensureStore();
+  return ensureStore().store;
+}
+
+/** Carrega histórico de mensagens de uma conversa. */
+export function loadHistory(sessionId: string): { role: "user" | "assistant"; content: string }[] {
+  return getStore().listChatHistory(sessionId);
+}
+
+/** Processa uma mensagem do user, persistindo cada AgentEvent. */
+export async function* handleUserMessage(
+  sessionId: string,
+  userMessage: string,
+  attachments: { name: string; size: number; type: "text" | "image"; mime: string }[] = []
+): AsyncIterable<AgentEvent> {
   const a = getAgent(sessionId);
-  for await (const ev of a.handle(userMessage)) {
+  const store = getStore();
+
+  // Persiste mensagem do user
+  store.addMessage(sessionId, "user", userMessage, { attachments });
+
+  // Carrega histórico e processa
+  const history = store.listChatHistory(sessionId).slice(0, -1); // -1 = última (a que acabamos de salvar)
+
+  // Buffer de mensagens assistant pendentes pra salvar junto
+  let assistantText = "";
+  const toolMessages: { role: "tool"; content: string; toolName: string }[] = [];
+  const userMsgForLlm = attachments.length > 0
+    ? `${userMessage}\n\n[${attachments.length} anexo(s): ${attachments.map((a) => `${a.name} (${a.type})`).join(", ")}]`
+    : userMessage;
+
+  for await (const ev of a.handle(userMsgForLlm, { initialMessages: history })) {
+    // Acumula texto do assistant e tools
+    switch (ev.type) {
+      case "message":
+        assistantText += ev.content;
+        break;
+      case "tool:result":
+        toolMessages.push({
+          role: "tool",
+          content: typeof ev.output === "string" ? ev.output : JSON.stringify(ev.output),
+          toolName: ev.tool,
+        });
+        break;
+      case "done":
+        // Persiste assistant text + tool messages
+        if (assistantText.trim()) {
+          store.addMessage(sessionId, "assistant", assistantText.trim());
+        }
+        for (const tm of toolMessages) {
+          store.addMessage(sessionId, "tool", tm.content, { toolName: tm.toolName });
+        }
+        break;
+      case "error":
+        // Persiste erro como system
+        store.addMessage(sessionId, "system", `Erro: ${ev.message}`);
+        break;
+    }
     yield ev;
   }
 }
@@ -88,23 +157,19 @@ export function stopAgent(sessionId: string): void {
   a.stop();
 }
 
-/** Atualiza o provider em runtime (settings UI). */
+/** Atualiza o provider em runtime. */
 export function setProvider(next: ProviderConfig): void {
   provider = next;
-  // Invalida o agent pra forçar recriação com novo model
-  agent = null;
+  entry = null;
   currentSessionId = null;
   logger.info({ provider }, "Provider atualizado");
 }
 
-/** Retorna o provider atual. */
 export function getProvider(): ProviderConfig {
   return provider;
 }
 
-/** Retorna info de debug pro renderer. */
 export function getDebugInfo() {
-  const a = agent;
   return {
     provider,
     userData: app.getPath("userData"),
@@ -114,7 +179,7 @@ export function getDebugInfo() {
     platform: process.platform,
     nodeVersion: process.versions.node,
     electronVersion: process.versions.electron,
-    toolCount: a?.tools.list().length ?? 0,
+    toolCount: entry?.agent.tools.list().length ?? 0,
     currentSessionId,
   };
 }

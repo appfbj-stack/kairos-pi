@@ -76,6 +76,25 @@ const api = {
     sessionId: string
   ): Promise<{ name: string; description: string; dangerous: boolean }[]> =>
     ipcRenderer.invoke("agent:list-tools", sessionId),
+
+  // Conversations (Sprint 1.4)
+  conversations: {
+    list: (): Promise<
+      { id: string; createdAt: number; updatedAt: number; title: string | null }[]
+    > => ipcRenderer.invoke("conversations:list"),
+    create: (title?: string): Promise<{ id: string; createdAt: number; updatedAt: number; title: string | null }> =>
+      ipcRenderer.invoke("conversations:create", title),
+    get: (
+      id: string
+    ): Promise<{
+      conversation: { id: string; createdAt: number; updatedAt: number; title: string | null };
+      messages: { id: string; role: string; content: string; attachments: string | null; toolName: string | null; createdAt: number }[];
+    } | null> => ipcRenderer.invoke("conversations:get", id),
+    delete: (id: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke("conversations:delete", id),
+    rename: (id: string, title: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke("conversations:rename", id, title),
+  },
 };
 
 contextBridge.exposeInMainWorld("kairos", api);

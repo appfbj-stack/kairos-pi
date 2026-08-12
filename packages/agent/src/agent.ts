@@ -26,9 +26,19 @@ export class Agent {
   /**
    * Inicia o loop do agente com a mensagem do usuário.
    * Emite AgentEvent conforme processa.
+   *
+   * @param userMessage Texto enviado pelo usuário
+   * @param options.initialMessages Histórico prévio da conversa (papel + conteúdo)
+   *        para manter contexto entre turnos. Sprint 1.4: persistido em SQLite
+   *        via ConversationStore.
    */
-  async *handle(userMessage: string): AsyncIterable<AgentEvent> {
-    yield* runAgentLoop(this, userMessage);
+  async *handle(
+    userMessage: string,
+    options: {
+      initialMessages?: { role: "user" | "assistant"; content: string }[];
+    } = {}
+  ): AsyncIterable<AgentEvent> {
+    yield* runAgentLoop(this, userMessage, options);
   }
 
   /**
