@@ -397,14 +397,14 @@ Como vamos rodar o Pi via **SDK** (Sprint 0, seção 12.5), as extensões pronta
 
 ### 13.3 O que AINDA precisa ser escrito do zero (custom)
 
-| Extensão | Status | Por que não tem pronta | Esforço |
+| Extensão | Status | Commit | Tools |
 |---|---|---|---|
-| `kairos-files` | ✅ **FEITO** (commit `8d68f05`) | File system operations com whitelist + confirmação destrutiva. | — |
-| `kairos-video` | ✅ **FEITO** (commit `5d57778`) | Wrapper ffmpeg (conversão, corte, extração de áudio, probe). | — |
-| `kairos-spreadsheets` | ⏭️ próximo | Excel/xls/csv. Não vi package oficial. | Médio |
-| `kairos-pdf-create` | — | `pi-web-access` extrai texto de PDF, mas **criar** PDF precisa de tool própria. | Médio |
-| `kairos-documents` | — | Word .docx (criar/editar). Não tem package oficial. | Médio |
-| `kairos-images` | — | Processamento local (sharp) + geração via provider. | Médio |
+| `kairos-video` | ✅ **FEITO** | `5d57778` | convert, trim, probe, audio (ffmpeg empacotado) |
+| `kairos-files` | ✅ **FEITO** | `8d68f05` | mkdir, list, read, write, delete, move, search (whitelist) |
+| `kairos-spreadsheets` | ✅ **FEITO** | `9937ed2` | list, read, create, append, export (SheetJS) |
+| `kairos-pdf-create` | ✅ **FEITO** | `ce0add7` | create, create-from-table, merge, info (pdfkit + pdf-lib) |
+| `kairos-documents` | ✅ **FEITO** | `5c24356` | create, create-from-table, read, info (docx + mammoth) |
+| `kairos-images` | ✅ **FEITO** | `7a0f7f5` | info, resize, convert, compress, transform (sharp) |
 
 ### 13.4 Onde achar mais packages
 
