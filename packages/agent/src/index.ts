@@ -18,3 +18,12 @@ export {
   registerExtension,
   registerExtensions,
 } from "./extensions/loader.js";
+export {
+  KNOWN_PROVIDERS,
+  type KnownProvider,
+  type ProviderConfig,
+  readProviderConfigFromEnv,
+  buildModel,
+  resolveApiKey,
+  runLlmLoop,
+} from "./llm/index.js";

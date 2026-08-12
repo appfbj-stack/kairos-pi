@@ -1,21 +1,22 @@
 /**
- * Loop principal do agente.
+ * Loop principal do agente — re-exporta o runLlmLoop real.
  *
- * Modelado no Pi Agent loop:
- *   user message → plan → tool call → tool result → ... → done
+ * Mantido como entrypoint estável (Agent.handle() chama daqui).
+ * A implementação real está em ./llm/loop.ts.
  *
- * A implementação real (Sprint 1) vai usar `complete()` de `@earendil-works/pi-ai`
- * com streaming, parsear tool calls, executar via ToolRegistry e devolver AgentEvent.
+ * Casa com o loop do Pi Agent (https://pi.dev/docs/latest/sdk).
  */
 
 import type { Agent } from "./agent.js";
 import type { AgentEvent } from "./types.js";
+import { runLlmLoop, readProviderConfigFromEnv } from "./llm/index.js";
 
 export async function* runAgentLoop(
-  _agent: Agent,
-  _userMessage: string
+  agent: Agent,
+  userMessage: string
 ): AsyncIterable<AgentEvent> {
-  // Stub para Sprint 0 — retorna só um done.
-  // Sprint 1 substitui pelo loop real com LLM streaming + tool execution.
-  yield { type: "done", reason: "stop" };
+  // Lê config do env. Sprint 1+: ler de settings persistido no SQLite.
+  const provider = readProviderConfigFromEnv();
+
+  yield* runLlmLoop(agent, userMessage, { provider });
 }
