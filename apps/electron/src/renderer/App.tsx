@@ -1,18 +1,19 @@
 /**
- * Kairós Desktop Alves — chat UI funcional.
+ * Kairós Desktop Alves — chat UI funcional com anexos.
  *
- * Sprint 1.2: usa a API do preload pra mandar mensagens e receber eventos.
+ * Sprint 1.3: botão 📎 funcional, file dialog, attachments inline.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
+import type { Attachment, AttachmentSummary } from "../preload/index.js";
 
 interface Message {
   id: string;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
   toolName?: string;
-  dangerous?: boolean;
+  attachments?: { name: string; size: number }[];
   ts: number;
 }
 
@@ -21,13 +22,14 @@ const SESSION_ID = "session-" + Date.now();
 export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentSummary[]>([]);
   const [busy, setBusy] = useState(false);
   const [provider, setProviderState] = useState<ProviderConfig | null>(null);
   const [toolCount, setToolCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Init: pega provider, inicia sessão
+  // Init
   useEffect(() => {
     void (async () => {
       const p = await window.kairos!.getProvider();
@@ -36,18 +38,16 @@ export function App() {
       const session = await window.kairos!.start(SESSION_ID);
       setToolCount(session.toolCount);
       addSystemMessage(
-        `Sessão iniciada. ${session.toolCount} tools disponíveis. Provider: ${p.provider} / ${p.modelId}`
+        `Sessão iniciada. ${session.toolCount} tools. Provider: ${p.provider} / ${p.modelId}`
       );
     })();
 
-    // Subscribe a eventos do agent
     const off = window.kairos!.onAgentEvent(SESSION_ID, (event: AgentEvent) => {
       handleAgentEvent(event);
     });
     return () => off();
   }, []);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -64,7 +64,6 @@ export function App() {
       const last = m[m.length - 1];
       switch (event.type) {
         case "message": {
-          // Acumula na última mensagem do assistant, ou cria nova
           if (last && last.role === "assistant") {
             const updated = [...m];
             updated[updated.length - 1] = { ...last, content: last.content + event.content };
@@ -100,11 +99,9 @@ export function App() {
             },
           ];
         case "progress":
-          // Não polui UI, pode ser exibido em indicador separado no futuro
           return m;
         case "permission:request":
-          // UI simples: alerta nativo do browser
-          window.alert(`⚠️ ${event.prompt}\n\nTool: ${event.tool}\n\n(Em produção, popup custom)`);
+          window.alert(`⚠️ ${event.prompt}\n\nTool: ${event.tool}`);
           return m;
         case "done":
           setBusy(false);
@@ -118,17 +115,49 @@ export function App() {
     });
   }
 
+  async function handleAttach() {
+    if (busy) return;
+    const result = await window.kairos!.openFileDialog();
+    if (result.canceled) return;
+    setPendingAttachments((prev) => [...prev, ...result.files]);
+  }
+
+  function removePendingAttachment(idx: number) {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   async function handleSend() {
     const text = draft.trim();
-    if (!text || busy) return;
+    if ((!text && pendingAttachments.length === 0) || busy) return;
     setDraft("");
     setBusy(true);
+
+    // Lê conteúdo dos anexos via IPC
+    let attachments: Attachment[] = [];
+    if (pendingAttachments.length > 0) {
+      try {
+        attachments = await window.kairos!.attach(pendingAttachments.map((a) => a.path));
+      } catch (err) {
+        addSystemMessage(`Erro lendo anexos: ${err instanceof Error ? err.message : String(err)}`);
+        setBusy(false);
+        return;
+      }
+    }
+
     setMessages((m) => [
       ...m,
-      { id: crypto.randomUUID(), role: "user", content: text, ts: Date.now() },
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: text || "(anexo)",
+        attachments: pendingAttachments.map((a) => ({ name: a.name, size: a.size })),
+        ts: Date.now(),
+      },
     ]);
+    setPendingAttachments([]);
+
     try {
-      await window.kairos!.send(SESSION_ID, text);
+      await window.kairos!.send(SESSION_ID, text, attachments);
     } catch (err) {
       addSystemMessage(`Erro: ${err instanceof Error ? err.message : String(err)}`);
       setBusy(false);
@@ -180,10 +209,10 @@ export function App() {
         </div>
       </header>
 
-      {/* Settings panel */}
+      {/* Settings */}
       {showSettings && provider && (
         <div className="border-b border-slate-800 bg-slate-950 px-6 py-4">
-          <h2 className="mb-2 text-sm font-semibold text-slate-300">Configurações de Provider</h2>
+          <h2 className="mb-2 text-sm font-semibold text-slate-300">Provider</h2>
           <div className="grid grid-cols-3 gap-3">
             <select
               value={provider.provider}
@@ -199,20 +228,17 @@ export function App() {
               type="text"
               value={provider.modelId}
               onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
-              placeholder="model ID (ex: anthropic/claude-3.5-sonnet)"
+              placeholder="model ID"
               className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
             />
             <input
               type="text"
               value={provider.apiKey ?? ""}
               onChange={(e) => handleProviderChange({ ...provider, apiKey: e.target.value || undefined })}
-              placeholder="API key (opcional — usa env se vazio)"
+              placeholder="API key"
               className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
             />
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            KAIROS_API_KEY, KAIROS_PROVIDER e KAIROS_MODEL também funcionam via env.
-          </p>
         </div>
       )}
 
@@ -223,8 +249,9 @@ export function App() {
             <div className="py-12 text-center text-slate-500">
               <p className="text-2xl">O que você quer que eu faça?</p>
               <p className="mt-2 text-sm">
-                {toolCount} tools disponíveis — arquivos, planilhas, PDFs, Word, imagens, vídeo.
+                {toolCount} tools — arquivos, planilhas, PDFs, Word, imagens, vídeo.
               </p>
+              <p className="mt-1 text-xs">Anexe arquivos pelo botão 📎 abaixo.</p>
             </div>
           )}
           {messages.map((m) => (
@@ -233,6 +260,30 @@ export function App() {
           <div ref={messagesEndRef} />
         </div>
       </main>
+
+      {/* Pending attachments */}
+      {pendingAttachments.length > 0 && (
+        <div className="border-t border-slate-800 bg-slate-950 px-6 py-2">
+          <div className="mx-auto flex max-w-3xl flex-wrap gap-2">
+            {pendingAttachments.map((a, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs"
+              >
+                <span>📎 {a.name}</span>
+                <span className="text-slate-500">({formatSize(a.size)})</span>
+                <button
+                  type="button"
+                  onClick={() => removePendingAttachment(i)}
+                  className="text-slate-500 hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <footer className="border-t border-slate-800 px-6 py-4">
@@ -245,10 +296,11 @@ export function App() {
         >
           <button
             type="button"
-            className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+            onClick={handleAttach}
+            className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
             aria-label="Anexar arquivo"
-            title="Anexar arquivo (Sprint 2)"
-            disabled
+            title="Anexar arquivo"
+            disabled={busy}
           >
             📎
           </button>
@@ -263,7 +315,7 @@ export function App() {
           <button
             type="submit"
             className="rounded-md bg-emerald-500 px-4 py-2 font-semibold text-slate-900 hover:bg-emerald-400 disabled:opacity-50"
-            disabled={busy || !draft.trim()}
+            disabled={busy || (!draft.trim() && pendingAttachments.length === 0)}
           >
             {busy ? "..." : "➤"}
           </button>
@@ -273,12 +325,27 @@ export function App() {
   );
 }
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
 function MessageBubble({ msg }: { msg: Message }) {
   const base = "max-w-[85%] rounded-lg px-4 py-2 text-sm";
   if (msg.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className={`${base} bg-emerald-600 text-white`}>{msg.content}</div>
+        <div className={`${base} bg-emerald-600 text-white`}>
+          {msg.attachments && msg.attachments.length > 0 && (
+            <div className="mb-1 flex flex-wrap gap-1 text-xs opacity-80">
+              {msg.attachments.map((a, i) => (
+                <span key={i}>📎 {a.name}</span>
+              ))}
+            </div>
+          )}
+          {msg.content}
+        </div>
       </div>
     );
   }
@@ -298,7 +365,6 @@ function MessageBubble({ msg }: { msg: Message }) {
       </div>
     );
   }
-  // system
   return (
     <div className="flex justify-center">
       <div className="text-xs text-slate-500 italic">{msg.content}</div>

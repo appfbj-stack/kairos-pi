@@ -1,11 +1,25 @@
 /**
  * Preload — expõe API segura pro renderer via contextBridge.
  *
- * Sprint 1.2: API completa de chat (send, stop, onEvent, listTools, provider).
+ * Sprint 1.3: adicionado openFileDialog e attach.
  */
 
 import { contextBridge, ipcRenderer } from "electron";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
+
+export interface AttachmentSummary {
+  name: string;
+  size: number;
+  path: string;
+}
+
+export interface Attachment {
+  name: string;
+  size: number;
+  type: "text" | "image";
+  mime: string;
+  content: string;
+}
 
 const api = {
   // Health
@@ -14,6 +28,15 @@ const api = {
 
   debug: (): Promise<unknown> => ipcRenderer.invoke("app:debug"),
 
+  // File dialog (Sprint 1.3)
+  openFileDialog: (): Promise<
+    { canceled: true; files: [] } | { canceled: false; files: AttachmentSummary[] }
+  > => ipcRenderer.invoke("dialog:open-file"),
+
+  // Attach (Sprint 1.3)
+  attach: (paths: string[]): Promise<Attachment[]> =>
+    ipcRenderer.invoke("agent:attach", paths),
+
   // Sessão
   start: (
     sessionId: string
@@ -21,10 +44,13 @@ const api = {
     ipcRenderer.invoke("agent:start", sessionId),
 
   // Chat
-  send: (sessionId: string, userMessage: string): Promise<{ ok: true }> =>
-    ipcRenderer.invoke("agent:send", sessionId, userMessage),
+  send: (
+    sessionId: string,
+    userMessage: string,
+    attachments?: { name: string; type: "text" | "image"; mime: string; content: string }[]
+  ): Promise<{ ok: true }> => ipcRenderer.invoke("agent:send", sessionId, userMessage, attachments),
 
-  // Recebe eventos do agent (message, tool:call, tool:result, progress, etc)
+  // Recebe eventos do agent
   onAgentEvent: (
     sessionId: string,
     cb: (event: AgentEvent) => void
