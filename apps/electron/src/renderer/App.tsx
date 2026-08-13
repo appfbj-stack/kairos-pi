@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
-import type { Attachment, PermissionRequest } from "../preload/index.js";
+import type { Attachment, PermissionRequest } from "../preload/index.mjs";
 
 interface Conversation {
   id: string;
@@ -69,7 +69,7 @@ export function App() {
       const data = await window.kairos!.conversations.get(currentConv.id);
       if (data) {
         setMessages(
-          data.messages.map((m) => ({
+          data.messages.map((m: { id: string; role: string; content: string; toolName: string | null; attachments: string | null; createdAt: number }) => ({
             id: m.id,
             role: m.role as Message["role"],
             content: m.content,
@@ -98,7 +98,7 @@ export function App() {
 
   // Subscribe a pedidos de permissão (modal centralizado)
   useEffect(() => {
-    const off = window.kairos!.onPermissionRequest((req) => {
+    const off = window.kairos!.onPermissionRequest((req: PermissionRequest) => {
       setPermissionRequest(req);
     });
     return () => off();
@@ -178,7 +178,7 @@ export function App() {
     const data = await window.kairos!.conversations.get(id);
     if (data) {
       setMessages(
-        data.messages.map((m) => ({
+        data.messages.map((m: { id: string; role: string; content: string; toolName: string | null; attachments: string | null; createdAt: number }) => ({
           id: m.id,
           role: m.role as Message["role"],
           content: m.content,
