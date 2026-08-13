@@ -3,11 +3,15 @@
  *
  * Sprint 1.4: persistência. Sidebar lista conversas, click carrega histórico,
  * botão "+" cria nova.
+ *
+ * Sprint 1.5: modal de confirmação para tools destrutivas. Substitui o
+ * `window.alert` feio. O componente `<PermissionModal />` aparece centralizado
+ * com backdrop blur, mostra tool + argumentos, e o user escolhe Permitir/Negar.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
-import type { Attachment } from "../preload/index.js";
+import type { Attachment, PermissionRequest } from "../preload/index.js";
 
 interface Conversation {
   id: string;
@@ -38,6 +42,7 @@ export function App() {
   const [toolCount, setToolCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Init: provider, lista conversas, sessão inicial
@@ -91,6 +96,14 @@ export function App() {
     return () => off();
   }, [sessionId]);
 
+  // Subscribe a pedidos de permissão (modal centralizado)
+  useEffect(() => {
+    const off = window.kairos!.onPermissionRequest((req) => {
+      setPermissionRequest(req);
+    });
+    return () => off();
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -138,7 +151,7 @@ export function App() {
         case "progress":
           return m;
         case "permission:request":
-          window.alert(`⚠️ ${event.prompt}\n\nTool: ${event.tool}`);
+          // O modal centralizado cuida da UI; aqui só logamos silenciosamente.
           return m;
         case "done":
           setBusy(false);
@@ -247,6 +260,19 @@ export function App() {
   async function handleProviderChange(next: ProviderConfig) {
     await window.kairos!.setProvider(next);
     setProviderState(next);
+  }
+
+  async function handlePermissionResponse(approved: boolean) {
+    if (!permissionRequest) return;
+    const req = permissionRequest;
+    setPermissionRequest(null);
+    try {
+      await window.kairos!.respondPermission(req.requestId, approved);
+    } catch (err) {
+      addSystemMessage(
+        `Erro respondendo permissão: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   return (
@@ -458,6 +484,14 @@ export function App() {
           </form>
         </footer>
       </div>
+
+      {/* Modal de permissão (Sprint 1.5) */}
+      {permissionRequest && (
+        <PermissionModal
+          request={permissionRequest}
+          onRespond={(approved) => void handlePermissionResponse(approved)}
+        />
+      )}
     </div>
   );
 }
@@ -466,6 +500,101 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+/**
+ * Modal de confirmação para tools destrutivas (Sprint 1.5).
+ *
+ * Mostra:
+ *   - Tool sendo chamada
+ *   - Prompt amigável
+ *   - Argumentos formatados em JSON
+ *   - Botões Permitir (verde) / Negar (vermelho)
+ *   - Esc = nega, Enter = aprova
+ */
+function PermissionModal({
+  request,
+  onRespond,
+}: {
+  request: PermissionRequest;
+  onRespond: (approved: boolean) => void;
+}) {
+  // Esc = nega, Enter = aprova
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onRespond(false);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        onRespond(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onRespond]);
+
+  const argsStr = (() => {
+    try {
+      return JSON.stringify(request.input, null, 2);
+    } catch {
+      return String(request.input);
+    }
+  })();
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="perm-title"
+    >
+      <div className="w-full max-w-lg rounded-xl border border-amber-500/40 bg-slate-900 p-6 shadow-2xl">
+        <div className="mb-4 flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400">
+            <span className="text-2xl" aria-hidden="true">⚠️</span>
+          </div>
+          <div className="flex-1">
+            <h2 id="perm-title" className="text-lg font-semibold text-slate-100">
+              Ação requer confirmação
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">{request.prompt}</p>
+          </div>
+        </div>
+
+        <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs">
+            <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-emerald-300">
+              {request.tool}
+            </span>
+            <span className="text-slate-500">ID: {request.requestId}</span>
+          </div>
+          <p className="mb-1 text-xs font-semibold text-slate-400">Argumentos:</p>
+          <pre className="max-h-40 overflow-auto rounded bg-slate-900 p-2 text-xs text-slate-300 font-mono">
+            {argsStr}
+          </pre>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => onRespond(false)}
+            className="rounded-md border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
+          >
+            Negar (Esc)
+          </button>
+          <button
+            type="button"
+            onClick={() => onRespond(true)}
+            className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-400"
+            autoFocus
+          >
+            Permitir (Enter)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MessageBubble({ msg }: { msg: Message }) {

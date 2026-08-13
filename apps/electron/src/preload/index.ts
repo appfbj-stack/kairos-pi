@@ -2,6 +2,7 @@
  * Preload — expõe API segura pro renderer via contextBridge.
  *
  * Sprint 1.3: adicionado openFileDialog e attach.
+ * Sprint 1.5: adicionado onPermissionRequest e respondPermission (modal).
  */
 
 import { contextBridge, ipcRenderer } from "electron";
@@ -19,6 +20,14 @@ export interface Attachment {
   type: "text" | "image";
   mime: string;
   content: string;
+}
+
+/** Pedido de permissão enviado do main → renderer (Sprint 1.5). */
+export interface PermissionRequest {
+  requestId: string;
+  tool: string;
+  prompt: string;
+  input: unknown;
 }
 
 const api = {
@@ -76,6 +85,21 @@ const api = {
     sessionId: string
   ): Promise<{ name: string; description: string; dangerous: boolean }[]> =>
     ipcRenderer.invoke("agent:list-tools", sessionId),
+
+  // Permissions (Sprint 1.5) — modal de confirmação
+  onPermissionRequest: (
+    cb: (req: PermissionRequest) => void
+  ): (() => void) => {
+    const handler = (_e: unknown, req: PermissionRequest) => cb(req);
+    ipcRenderer.on("permission:request", handler);
+    return () => ipcRenderer.off("permission:request", handler);
+  },
+
+  respondPermission: (
+    requestId: string,
+    approved: boolean
+  ): Promise<{ ok: true }> =>
+    ipcRenderer.invoke("permission:response", requestId, approved),
 
   // Conversations (Sprint 1.4)
   conversations: {

@@ -162,15 +162,18 @@ export async function* runLlmLoop(
 
         // Confirmação destrutiva (PRD §16, §28)
         if (tool.dangerous) {
+          const prompt = `A tool "${call.name}" é destrutiva. Deseja continuar?`;
           yield {
             type: "permission:request",
             tool: call.name,
             input: call.arguments,
-            prompt: `A tool "${call.name}" é destrutiva. Deseja continuar?`,
+            prompt,
           };
-          const ok = await agent.permissions.confirm(
-            `Executar ${call.name}?`
-          );
+          const ok = await agent.permissions.confirm({
+            tool: call.name,
+            prompt,
+            input: call.arguments,
+          });
           if (!ok) {
             const cancelResult: ToolResultMessage = {
               role: "toolResult",
@@ -200,7 +203,12 @@ export async function* runLlmLoop(
             sessionId: agent.id,
             cwd: agent.config.workspaceDir,
             abortSignal: new AbortController().signal,
-            confirmDangerous: async (p) => agent.permissions.confirm(p),
+            confirmDangerous: async (p) =>
+              agent.permissions.confirm({
+                tool: call.name,
+                prompt: p,
+                input: call.arguments,
+              }),
           });
           const dur = Date.now() - start;
 
