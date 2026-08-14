@@ -6,9 +6,13 @@ node_modules/
 dist/
 dist-renderer/
 build/
+!apps/electron/build/  # recursos do Electron (ícone, scripts de generate)
 release/
 out/
 *.tsbuildinfo
+
+# electron-builder vendor (cópia dos workspaces, gerado no package)
+apps/electron/_vendor/
 
 # environment
 .env
