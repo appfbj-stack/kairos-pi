@@ -18,7 +18,7 @@
 
 import { type Api, type Model } from "@earendil-works/pi-ai";
 import { getEnvApiKey } from "@earendil-works/pi-ai/compat";
-import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { getBuiltinModel, getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { z } from "zod";
 
 export const KNOWN_PROVIDERS = [
@@ -37,9 +37,13 @@ export interface ProviderConfig {
   apiKey?: string;
 }
 
+// Default = NVIDIA Nemotron 3 Super 120B via OpenRouter (free, excelente raciocínio e tool-use).
+// O usuário pode trocar pelo painel ⚙️ na UI a qualquer momento.
+const DEFAULT_MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
+
 const envConfigSchema = z.object({
   provider: z.enum(KNOWN_PROVIDERS).default("openrouter"),
-  modelId: z.string().default("anthropic/claude-3.5-sonnet"),
+  modelId: z.string().default(DEFAULT_MODEL_ID),
   apiKey: z.string().optional(),
 });
 
@@ -52,7 +56,7 @@ export function readProviderConfigFromEnv(): ProviderConfig {
   };
   const parsed = envConfigSchema.parse({
     provider: raw.provider ?? "openrouter",
-    modelId: raw.modelId ?? "anthropic/claude-3.5-sonnet",
+    modelId: raw.modelId ?? DEFAULT_MODEL_ID,
     apiKey: raw.apiKey,
   });
   return parsed;
@@ -68,7 +72,20 @@ export function buildModel(config: ProviderConfig): Model<Api> {
       `Provider desconhecido: ${config.provider}. Suportados: ${KNOWN_PROVIDERS.join(", ")}`
     );
   }
-  return getBuiltinModel(provider, config.modelId as never) as unknown as Model<Api>;
+  const model = getBuiltinModel(provider, config.modelId as never);
+  if (!model) {
+    const supported = getBuiltinModels(provider)
+      .map((m) => m.id)
+      .filter((id) => id.includes(":free"))
+      .slice(0, 5)
+      .join(", ");
+    throw new Error(
+      `Modelo "${config.modelId}" não encontrado no provider "${provider}". ` +
+        `Sugestões (free): ${supported}. ` +
+        `Defina KAIROS_MODEL=... ou troque no painel ⚙️.`
+    );
+  }
+  return model as unknown as Model<Api>;
 }
 
 /** Retorna a API key: explícita > env específica do provider > env KAIROS_API_KEY. */
