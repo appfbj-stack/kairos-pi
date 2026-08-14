@@ -13,6 +13,8 @@ out/
 
 # electron-builder vendor (cópia dos workspaces, gerado no package)
 apps/electron/_vendor/
+apps/electron/_deployed/
+_deployed/
 
 # environment
 .env
