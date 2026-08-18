@@ -48,8 +48,10 @@ export async function* runLlmLoop(
   const model = buildModel(options.provider);
   const apiKey = resolveApiKey(options.provider);
 
-  // 1. Constrói tools no formato do pi-ai (typebox)
-  const tools: PiTool[] = agent.tools.list().map(toKairosToolToPiTool);
+  // 1. Constrói tools no formato do pi-ai (typebox). Mapeia nome
+  // sanitizado → nome original pra resolver tool calls do LLM.
+  const nameLookup = new Map<string, string>();
+  const tools: PiTool[] = agent.tools.list().map((t) => toKairosToolToPiTool(t, nameLookup));
 
   // 2. Carrega histórico (se houver) + mensagem do user
   const messages: Message[] = [];
@@ -137,7 +139,9 @@ export async function* runLlmLoop(
           return;
         }
 
-        const tool = agent.tools.get(call.name);
+        // Resolve nome sanitizado → nome original. O LLM envia o sanitizado.
+        const originalName = nameLookup.get(call.name) ?? call.name;
+        const tool = agent.tools.get(originalName);
         if (!tool) {
           // Tool não encontrada — devolve erro
           const errResult: ToolResultMessage = {
@@ -158,19 +162,19 @@ export async function* runLlmLoop(
           continue;
         }
 
-        yield { type: "tool:call", tool: call.name, input: call.arguments };
+        yield { type: "tool:call", tool: originalName, input: call.arguments };
 
         // Confirmação destrutiva (PRD §16, §28)
         if (tool.dangerous) {
-          const prompt = `A tool "${call.name}" é destrutiva. Deseja continuar?`;
+          const prompt = `A tool "${originalName}" é destrutiva. Deseja continuar?`;
           yield {
             type: "permission:request",
-            tool: call.name,
+            tool: originalName,
             input: call.arguments,
             prompt,
           };
           const ok = await agent.permissions.confirm({
-            tool: call.name,
+            tool: originalName,
             prompt,
             input: call.arguments,
           });
@@ -178,6 +182,7 @@ export async function* runLlmLoop(
             const cancelResult: ToolResultMessage = {
               role: "toolResult",
               toolCallId: call.id,
+              // LLM mandou o nome sanitizado — devolve o mesmo pra match.
               toolName: call.name,
               content: [{ type: "text", text: "Cancelado pelo usuário" }],
               isError: true,
@@ -186,7 +191,7 @@ export async function* runLlmLoop(
             messages.push(cancelResult);
             yield {
               type: "tool:result",
-              tool: call.name,
+              tool: originalName,
               output: "Cancelado pelo usuário",
               durationMs: 0,
             };
@@ -205,7 +210,7 @@ export async function* runLlmLoop(
             abortSignal: new AbortController().signal,
             confirmDangerous: async (p) =>
               agent.permissions.confirm({
-                tool: call.name,
+                tool: originalName,
                 prompt: p,
                 input: call.arguments,
               }),
@@ -215,6 +220,7 @@ export async function* runLlmLoop(
           const resultMsg: ToolResultMessage = {
             role: "toolResult",
             toolCallId: call.id,
+            // LLM mandou o nome sanitizado — devolve o mesmo pra match.
             toolName: call.name,
             content: [{ type: "text", text: JSON.stringify(result) }],
             isError: false,
@@ -223,7 +229,7 @@ export async function* runLlmLoop(
           messages.push(resultMsg);
           yield {
             type: "tool:result",
-            tool: call.name,
+            tool: originalName,
             output: result,
             durationMs: dur,
           };
@@ -245,7 +251,7 @@ export async function* runLlmLoop(
           messages.push(errMsg);
           yield {
             type: "tool:result",
-            tool: call.name,
+            tool: originalName,
             output: `Erro: ${err instanceof Error ? err.message : String(err)}`,
             durationMs: dur,
           };
@@ -318,12 +324,25 @@ async function* processStreamEvent(
   }
 }
 
-/** Converte Tool Kairos (Zod) → Tool pi-ai (typebox). */
-function toKairosToolToPiTool(tool: KairosTool): PiTool {
-  // Cast seguro: a Tool tem inputSchema: ZodType. O pi-ai Tool quer parameters: TSchema.
+/** Converte Tool Kairos (Zod) → Tool pi-ai (typebox).
+ *
+ * OpenAI-compatible APIs (incluindo Nemotron via OpenRouter) rejeitam tool
+ * names com caracteres fora de [a-zA-Z0-9_-]. Kairós usa `namespace:tool`
+ * (ex: `files:mkdir`), então normalizamos pra `namespace_tool` ao enviar
+ * pro LLM. O nome original é preservado internamente — a conversão
+ * reversa acontece no stream event via `originalNameBySanitized`.
+ */
+function toKairosToolToPiTool(tool: KairosTool, lookup: Map<string, string>): PiTool {
+  const sanitized = sanitizeToolName(tool.name);
+  if (sanitized !== tool.name) lookup.set(sanitized, tool.name);
   return {
-    name: tool.name,
+    name: sanitized,
     description: tool.description,
     parameters: zodToTypebox(tool.inputSchema) as never,
   };
+}
+
+/** "files:mkdir" → "files_mkdir". Mantém [a-zA-Z0-9_-]. */
+function sanitizeToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
