@@ -17,7 +17,7 @@ import {
   getStore,
   respondPermission,
 } from "./agent-instance.js";
-import type { AgentEvent, ProviderConfig } from "@kairos/agent";
+import { listOllamaModels, type AgentEvent, type ProviderConfig } from "@kairos/agent";
 import { logger } from "@kairos/core";
 
 function getWindow(event: IpcMainInvokeEvent): BrowserWindow | null {
@@ -243,6 +243,12 @@ export function registerIpcHandlers(): void {
       return { ok: true, provider: getProvider() };
     }
   );
+
+  // Ollama local — lista modelos baixados (Sprint 1.7+).
+  // Se Ollama nao estiver rodando, retorna [] (sem throw).
+  ipcMain.handle("agent:ollama:list-models", async (_event, baseUrl?: string) => {
+    return listOllamaModels(baseUrl);
+  });
 
   // Lista tools
   ipcMain.handle("agent:list-tools", async (_event, sessionId: string) => {

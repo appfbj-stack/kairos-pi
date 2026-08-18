@@ -80,6 +80,12 @@ const api = {
   setProvider: (next: ProviderConfig): Promise<{ ok: true; provider: ProviderConfig }> =>
     ipcRenderer.invoke("agent:provider:set", next),
 
+  // Lista modelos locais do Ollama (Sprint 1.7+).
+  // Retorna [] se Ollama nao estiver rodando.
+  listOllamaModels: (baseUrl?: string): Promise<
+    { id: string; name: string; size: number; modified_at: string; family?: string; parameter_size?: string; quantization_level?: string }[]
+  > => ipcRenderer.invoke("agent:ollama:list-models", baseUrl),
+
   // Tools
   listTools: (
     sessionId: string

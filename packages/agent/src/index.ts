@@ -22,8 +22,10 @@ export {
   KNOWN_PROVIDERS,
   type KnownProvider,
   type ProviderConfig,
+  type OllamaModelInfo,
   readProviderConfigFromEnv,
   buildModel,
   resolveApiKey,
+  listOllamaModels,
   runLlmLoop,
 } from "./llm/index.js";
