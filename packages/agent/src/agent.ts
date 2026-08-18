@@ -3,6 +3,10 @@
  *
  * A UI (Electron) instancia um Agent por sessão e escuta os eventos
  * via stream/observer. O loop é desacoplado da UI.
+ *
+ * Sprint 1.8: provider agora é parte do AgentConfig (mutável).
+ * Antes lia do env, ignorando mudanças da UI. Agora a UI atualiza
+ * `agent.config.provider` e o loop usa isso.
  */
 
 import { runAgentLoop } from "./loop.js";
@@ -38,6 +42,8 @@ export class Agent {
       initialMessages?: { role: "user" | "assistant"; content: string }[];
     } = {}
   ): AsyncIterable<AgentEvent> {
+    // Reseta estado de abort pra novo turno (Sprint 1.8).
+    this.permissions.resetAbort();
     yield* runAgentLoop(this, userMessage, options);
   }
 
@@ -45,7 +51,6 @@ export class Agent {
    * Pede cancelamento da execução atual.
    */
   stop(): void {
-    // Implementação real na Sprint 1.
     this.permissions.abort();
   }
 }

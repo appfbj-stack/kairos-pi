@@ -3,9 +3,12 @@
  */
 
 import type { Model } from "@earendil-works/pi-ai";
+import type { ProviderConfig } from "./llm/index.js";
 
 export interface AgentConfig {
-  /** Modelo LLM padrão (Anthropic, OpenAI, OpenRouter, MiniMax). */
+  /** Config do provider LLM ativo (mutável — UI troca em runtime). */
+  provider: ProviderConfig;
+  /** Model do pi-ai cacheado. Recalculado quando provider muda. */
   model: Model<any>;
   /** Diretório onde fica o SQLite (`kairos.db`) e arquivos de sessão. */
   workspaceDir: string;

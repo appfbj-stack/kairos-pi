@@ -4,12 +4,12 @@
  * Mantido como entrypoint estável (Agent.handle() chama daqui).
  * A implementação real está em ./llm/loop.ts.
  *
- * Casa com o loop do Pi Agent (https://pi.dev/docs/latest/sdk).
+ * Sprint 1.8: usa o provider do agent.config (mutável pela UI), não do env.
  */
 
 import type { Agent } from "./agent.js";
 import type { AgentEvent } from "./types.js";
-import { runLlmLoop, readProviderConfigFromEnv } from "./llm/index.js";
+import { runLlmLoop } from "./llm/index.js";
 
 export async function* runAgentLoop(
   agent: Agent,
@@ -18,11 +18,8 @@ export async function* runAgentLoop(
     initialMessages?: { role: "user" | "assistant"; content: string }[];
   } = {}
 ): AsyncIterable<AgentEvent> {
-  // Lê config do env. Sprint 1+: ler de settings persistido no SQLite.
-  const provider = readProviderConfigFromEnv();
-
   yield* runLlmLoop(agent, userMessage, {
-    provider,
+    provider: agent.config.provider,
     initialMessages: options.initialMessages,
   });
 }

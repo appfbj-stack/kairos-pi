@@ -71,6 +71,7 @@ export function getAgent(sessionId: string): Agent {
   }
 
   const agent = new Agent(sessionId, {
+    provider,
     model: buildModel(provider),
     workspaceDir: workspaceDir(),
     enabledExtensions: [
@@ -197,6 +198,7 @@ export function respondPermission(requestId: string, approved: boolean): void {
 /** Atualiza o provider em runtime. */
 export function setProvider(next: ProviderConfig): void {
   provider = next;
+  // Invalida entry pra forçar recriação do Agent com novo model
   entry = null;
   currentSessionId = null;
   logger.info({ provider }, "Provider atualizado");
