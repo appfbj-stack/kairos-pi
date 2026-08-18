@@ -54,9 +54,19 @@ export function readProviderConfigFromEnv(): ProviderConfig {
     modelId: process.env.KAIROS_MODEL,
     apiKey: process.env.KAIROS_API_KEY,
   };
+  // Ignora valores "placeholder" conhecidos do Sprint 1 (que nao existem no
+  // catalogo do OpenRouter no pi-ai). Evita que o app fique travado num
+  // modelId invalido herdado de uma env var antiga.
+  const knownBrokenModelIds = new Set([
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3-5-sonnet",
+  ]);
+  const modelId = raw.modelId && !knownBrokenModelIds.has(raw.modelId)
+    ? raw.modelId
+    : DEFAULT_MODEL_ID;
   const parsed = envConfigSchema.parse({
     provider: raw.provider ?? "openrouter",
-    modelId: raw.modelId ?? DEFAULT_MODEL_ID,
+    modelId,
     apiKey: raw.apiKey,
   });
   return parsed;
