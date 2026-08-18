@@ -97,10 +97,12 @@ export function buildModel(config: ProviderConfig): Model<Api> {
   // Ollama: API OpenAI-compatível, entao usamos o provider openai do pi-ai
   // e sobrescrevemos o baseUrl pra apontar pro servidor local do Ollama.
   // O modelId é o nome exato do modelo baixado (ex: "qwen2.5:3b", "llama3.1:8b").
+  //
+  // IMPORTANTE: forçamos `api: "openai-completions"` (chat completions classico)
+  // porque Ollama nao implementa a nova API "openai-responses" do OpenAI.
+  // O template do openai no pi-ai vem com api="openai-responses" por default.
   if (provider === "ollama") {
     const baseUrl = config.baseUrl ?? DEFAULT_OLLAMA_URL;
-    // Pega um modelo openai "template" só pra herdar api base, nome etc.,
-    // e entao sobrescreve id e baseUrl.
     const openaiModels = getBuiltinModels("openai");
     if (openaiModels.length === 0) {
       throw new Error("Provider openai nao tem modelos disponiveis no pi-ai. Verifique a instalacao.");
@@ -111,6 +113,9 @@ export function buildModel(config: ProviderConfig): Model<Api> {
       id: config.modelId,
       name: config.modelId,
       baseUrl,
+      api: "openai-completions" as const, // <-- forca a API classica compativel com Ollama
+      provider: "openai", // Ollama impersona OpenAI
+      input: ["text"], // Ollama nao expoe multimodal de forma estavel ainda
     } as Model<Api>;
     return ollamaModel;
   }
