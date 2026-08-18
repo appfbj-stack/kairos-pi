@@ -10,7 +10,7 @@
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && pnpm build:preload && tsc -p tsconfig.node.json && cross-env NODE_ENV=development electron dist/main/index.js",
     "build:renderer": "vite build",
-    "build:preload": "tsc -p tsconfig.preload.json && node build/write-preload-pkg.mjs",
+    "build:preload": "node build/preload.config.mjs",
     "build:main": "tsc -p tsconfig.node.json",
     "build": "pnpm build:renderer && pnpm build:preload && pnpm build:main",
     "typecheck": "tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
@@ -50,7 +50,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico",
@@ -94,6 +96,7 @@
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "electron-updater": "^6.3.9",
+    "esbuild": "^0.28.2",
     "png-to-ico": "^3.0.2",
     "postcss": "^8.4.49",
     "sharp": "^0.34.5",

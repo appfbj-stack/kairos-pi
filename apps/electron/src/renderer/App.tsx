@@ -43,7 +43,23 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
+  const [ollamaModels, setOllamaModels] = useState<
+    { id: string; name: string; size: number; modified_at: string; family?: string; parameter_size?: string; quantization_level?: string }[]
+  >([]);
+  const [ollamaLoading, setOllamaLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  async function handleListOllama() {
+    setOllamaLoading(true);
+    try {
+      const models = await window.kairos.listOllamaModels();
+      setOllamaModels(models);
+    } catch (err) {
+      console.error("[ollama] failed to list models:", err);
+    } finally {
+      setOllamaLoading(false);
+    }
+  }
 
   // Init: provider, lista conversas, sessão inicial
   useEffect(() => {
@@ -382,27 +398,68 @@ export function App() {
                 className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
               >
                 <option value="openrouter">openrouter</option>
+                <option value="ollama">🦙 ollama (local)</option>
                 <option value="openai">openai</option>
                 <option value="anthropic">anthropic</option>
                 <option value="minimax">minimax</option>
               </select>
-              <input
-                type="text"
-                value={provider.modelId}
-                onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
-                placeholder="model ID"
-                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-              />
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={provider.modelId}
+                  onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
+                  placeholder={provider.provider === "ollama" ? "ex: qwen2.5:3b" : "model ID"}
+                  className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                />
+                {provider.provider === "ollama" && (
+                  <button
+                    type="button"
+                    onClick={handleListOllama}
+                    disabled={ollamaLoading}
+                    title="Listar modelos locais do Ollama"
+                    className="rounded-md border border-slate-700 bg-slate-800 px-2 py-2 text-sm hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    {ollamaLoading ? "..." : "🔄"}
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 value={provider.apiKey ?? ""}
                 onChange={(e) =>
                   handleProviderChange({ ...provider, apiKey: e.target.value || undefined })
                 }
-                placeholder="API key"
-                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                placeholder={provider.provider === "ollama" ? "API key (opcional, Ollama nao precisa)" : "API key"}
+                disabled={provider.provider === "ollama"}
+                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm disabled:opacity-50"
               />
             </div>
+            {provider.provider === "ollama" && ollamaModels.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1">
+                {ollamaModels.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => handleProviderChange({ ...provider, modelId: m.id })}
+                    className={`rounded-md border px-2 py-1 text-xs ${
+                      provider.modelId === m.id
+                        ? "border-emerald-500 bg-emerald-900/30 text-emerald-300"
+                        : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                    title={`${m.parameter_size ?? ""} ${m.quantization_level ?? ""} • ${(m.size / 1e9).toFixed(1)} GB`}
+                  >
+                    {m.id}
+                  </button>
+                ))}
+              </div>
+            )}
+            {provider.provider === "ollama" && ollamaModels.length === 0 && !ollamaLoading && (
+              <p className="mt-2 text-xs text-slate-500">
+                Ollama nao esta rodando ou nao tem modelos. Inicie com{" "}
+                <code className="rounded bg-slate-800 px-1.5 py-0.5 text-emerald-400">ollama serve</code>{" "}
+                e depois clique 🔄.
+              </p>
+            )}
           </div>
         )}
 
