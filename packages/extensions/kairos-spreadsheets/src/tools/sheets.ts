@@ -4,7 +4,9 @@
 
 import { z } from "zod";
 import type { Tool } from "@kairos/agent";
-import * as XLSX from "xlsx";
+// xlsx é CJS — default import preserva readFile/writeFile/etc
+// (namespace import deixa readFile undefined em ESM strict)
+import XLSX from "xlsx";
 import { ensureAllowed } from "../safety.js";
 
 const inputSchema = z.object({
