@@ -302,12 +302,10 @@ async function* processStreamEvent(
       return undefined;
 
     case "done": {
-      // Texto final do assistant
-      const text = event.message.content
-        .filter((c) => c.type === "text")
-        .map((c) => (c as { type: "text"; text: string }).text)
-        .join("");
-      if (text) yield { type: "message", content: text };
+      // Sprint 1.8 fix: NÃO emitir text completo aqui — text_delta já veio
+      // pedaço a pedaço. Se emitisse, o usuário veria o texto duplicado.
+      // O `event.message` (AssistantMessage) já é retornado para o loop
+      // continuar processando tool calls, e o texto está em message.content.
       return event.message;
     }
 
