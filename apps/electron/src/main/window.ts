@@ -19,7 +19,7 @@ export function createMainWindow({ isDev }: { isDev: boolean }): BrowserWindow {
     backgroundColor: "#0f172a", // slate-900 (paleta definida no briefing §8)
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, "../preload/index.mjs"),
+      preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false, // Mantém acesso ao preload TS; tighten na Sprint 5
