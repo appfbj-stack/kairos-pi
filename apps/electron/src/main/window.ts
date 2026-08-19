@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export function createMainWindow({ isDev }: { isDev: boolean }): BrowserWindow {
+  console.log(`[window] creating BrowserWindow (isDev=${isDev})`);
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -17,16 +18,21 @@ export function createMainWindow({ isDev }: { isDev: boolean }): BrowserWindow {
     minHeight: 500,
     title: "Kairós Desktop Alves",
     backgroundColor: "#0f172a", // slate-900 (paleta definida no briefing §8)
-    show: false,
+    show: true, // Sprint 1.9 fix: forca show=true pra nao depender de ready-to-show
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // Mantém acesso ao preload TS; tighten na Sprint 5
+      sandbox: false,
     },
   });
+  console.log(`[window] BrowserWindow created, id=${win.id}`);
 
-  win.once("ready-to-show", () => win.show());
+  // Tambem escuta ready-to-show caso queira esconder ate carregar
+  win.once("ready-to-show", () => {
+    console.log(`[window] ready-to-show fired, showing window`);
+    win.show();
+  });
 
   // Loga tudo que acontece no console do renderer pra ajudar debug em dev.
   win.webContents.on("console-message", (_e, level, message, line, source) => {
@@ -39,6 +45,9 @@ export function createMainWindow({ isDev }: { isDev: boolean }): BrowserWindow {
   win.webContents.on("render-process-gone", (_e, details) => {
     console.error(`[renderer:gone] reason=${details.reason} exitCode=${details.exitCode}`);
   });
+  win.webContents.on("did-finish-load", () => {
+    console.log(`[window] did-finish-load`);
+  });
 
   // Links externos abrem no browser do sistema, não na app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -47,10 +56,13 @@ export function createMainWindow({ isDev }: { isDev: boolean }): BrowserWindow {
   });
 
   if (isDev) {
+    console.log(`[window] loadURL http://localhost:5173`);
     win.loadURL("http://localhost:5173");
     win.webContents.openDevTools({ mode: "detach" });
   } else {
-    win.loadFile(path.join(__dirname, "../../dist-renderer/index.html"));
+    const file = path.join(__dirname, "../../dist-renderer/index.html");
+    console.log(`[window] loadFile ${file}`);
+    win.loadFile(file);
   }
 
   return win;
