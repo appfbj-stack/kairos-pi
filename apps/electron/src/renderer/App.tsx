@@ -1,17 +1,19 @@
 /**
- * Kairós Desktop Alves — chat UI com sidebar de conversas.
+ * Kairós Desktop Alves — chat UI redesenhado.
  *
- * Sprint 1.4: persistência. Sidebar lista conversas, click carrega histórico,
- * botão "+" cria nova.
- *
- * Sprint 1.5: modal de confirmação para tools destrutivas. Substitui o
- * `window.alert` feio. O componente `<PermissionModal />` aparece centralizado
- * com backdrop blur, mostra tool + argumentos, e o user escolhe Permitir/Negar.
+ * Sprint 1.9: visual profissional com markdown, hover actions, tool cards, empty state.
+ * Sprint 1.4-1.8: provider mutavel, persistencia, permission modal, ollama, etc.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent, ProviderConfig } from "@kairos/agent";
 import type { Attachment, PermissionRequest } from "../preload/index.mjs";
+import { MessageBubble, type BubbleMessage } from "./components/MessageBubble";
+import { InputBar } from "./components/InputBar";
+import { EmptyState } from "./components/EmptyState";
+import { TypingIndicator } from "./components/TypingIndicator";
+import { Markdown } from "./components/Markdown";
+import type { ToolCall } from "./components/ToolCallCard";
 
 interface Conversation {
   id: string;
@@ -20,23 +22,33 @@ interface Conversation {
   title: string | null;
 }
 
-interface Message {
-  id: string;
-  role: "user" | "assistant" | "tool" | "system";
-  content: string;
-  toolName?: string;
-  attachments?: { name: string; size: number }[];
-  ts: number;
+const SESSION_ID = "session-" + Date.now();
+const PROVIDER_COLORS: Record<string, string> = {
+  openrouter: "from-blue-500 to-purple-500",
+  ollama: "from-emerald-500 to-green-500",
+  openai: "from-green-500 to-emerald-500",
+  anthropic: "from-orange-500 to-amber-500",
+  minimax: "from-slate-500 to-slate-700",
+};
+
+function providerColor(provider: string): string {
+  return PROVIDER_COLORS[provider] ?? "from-slate-500 to-slate-700";
 }
 
-const SESSION_ID = "session-" + Date.now();
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
 
 export function App() {
   const [sessionId, setSessionId] = useState<string>(SESSION_ID);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<BubbleMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [pendingAttachments, setPendingAttachments] = useState<{ name: string; size: number; path: string }[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    { name: string; size: number; path: string }[]
+  >([]);
   const [busy, setBusy] = useState(false);
   const [provider, setProviderState] = useState<ProviderConfig | null>(null);
   const [toolCount, setToolCount] = useState(0);
@@ -61,50 +73,43 @@ export function App() {
     }
   }
 
-  // Init: provider, lista conversas, sessão inicial
+  // Init
   useEffect(() => {
     void (async () => {
       const p = await window.kairos!.getProvider();
       setProviderState(p);
-
       const convs = await window.kairos!.conversations.list();
       setConversations(convs);
-
-      // Cria primeira conversa se não tem nenhuma
       let currentConv = convs[0];
       if (!currentConv) {
         currentConv = await window.kairos!.conversations.create("Nova conversa");
         setConversations([currentConv]);
       }
       setSessionId(currentConv.id);
-
       const session = await window.kairos!.start(currentConv.id);
       setToolCount(session.toolCount);
-
-      // Carrega mensagens da conversa
       const data = await window.kairos!.conversations.get(currentConv.id);
       if (data) {
         setMessages(
-          data.messages.map((m: { id: string; role: string; content: string; toolName: string | null; attachments: string | null; createdAt: number }) => ({
+          data.messages.map((m) => ({
             id: m.id,
-            role: m.role as Message["role"],
+            role: m.role as BubbleMessage["role"],
             content: m.content,
             toolName: m.toolName ?? undefined,
-            attachments: m.attachments ? JSON.parse(m.attachments) : undefined,
+            attachments: m.attachments ? (JSON.parse(m.attachments) as { name: string; size: number }[]) : undefined,
             ts: m.createdAt,
           }))
         );
       }
-
       addSystemMessage(
         `Kairós pronto. ${session.toolCount} tools. Provider: ${p.provider} / ${p.modelId}.`
       );
     })();
-
     return () => {};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Subscribe a eventos do agent quando sessionId muda
+  // Subscribe a agent events
   useEffect(() => {
     const off = window.kairos!.onAgentEvent(sessionId, (event: AgentEvent) => {
       handleAgentEvent(event);
@@ -112,7 +117,7 @@ export function App() {
     return () => off();
   }, [sessionId]);
 
-  // Subscribe a pedidos de permissão (modal centralizado)
+  // Subscribe a permission requests
   useEffect(() => {
     const off = window.kairos!.onPermissionRequest((req: PermissionRequest) => {
       setPermissionRequest(req);
@@ -120,8 +125,9 @@ export function App() {
     return () => off();
   }, []);
 
+  // Auto-scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
   function addSystemMessage(content: string) {
@@ -136,7 +142,8 @@ export function App() {
       const last = m[m.length - 1];
       switch (event.type) {
         case "message": {
-          if (last && last.role === "assistant") {
+          // Append delta to last assistant message, ou cria nova
+          if (last && last.role === "assistant" && !last.toolCall) {
             const updated = [...m];
             updated[updated.length - 1] = { ...last, content: last.content + event.content };
             return updated;
@@ -146,33 +153,54 @@ export function App() {
             { id: crypto.randomUUID(), role: "assistant", content: event.content, ts: Date.now() },
           ];
         }
-        case "tool:call":
-          return [
-            ...m,
-            { id: crypto.randomUUID(), role: "tool", content: `🔧 ${event.tool}`, toolName: event.tool, ts: Date.now() },
-          ];
-        case "tool:result":
+        case "tool:call": {
+          const call: ToolCall = {
+            name: event.tool,
+            args: event.input,
+            pending: true,
+          };
           return [
             ...m,
             {
               id: crypto.randomUUID(),
               role: "tool",
-              content: typeof event.output === "string"
-                ? `✓ ${event.tool} (${event.durationMs}ms): ${event.output.slice(0, 200)}`
-                : `✓ ${event.tool} (${event.durationMs}ms)`,
+              content: `🔧 ${event.tool}`,
               toolName: event.tool,
+              toolCall: call,
               ts: Date.now(),
             },
           ];
+        }
+        case "tool:result": {
+          // Atualiza a tool card anterior com o resultado
+          const idx = [...m].reverse().findIndex((x) => x.role === "tool" && x.toolName === event.tool && x.toolCall?.pending);
+          if (idx === -1) return m;
+          const realIdx = m.length - 1 - idx;
+          const updated = [...m];
+          const prev = updated[realIdx];
+          if (prev.toolCall) {
+            updated[realIdx] = {
+              ...prev,
+              toolCall: {
+                ...prev.toolCall,
+                pending: false,
+                result: event.output,
+                durationMs: event.durationMs,
+                isError: typeof event.output === "string" && event.output.startsWith("Erro:"),
+              },
+            };
+          }
+          return updated;
+        }
         case "progress":
           return m;
         case "permission:request":
-          // O modal centralizado cuida da UI; aqui só logamos silenciosamente.
           return m;
         case "done":
           setBusy(false);
           return m;
         case "error":
+          setBusy(false);
           return [
             ...m,
             { id: crypto.randomUUID(), role: "system", content: `❌ ${event.message}`, ts: Date.now() },
@@ -194,12 +222,12 @@ export function App() {
     const data = await window.kairos!.conversations.get(id);
     if (data) {
       setMessages(
-        data.messages.map((m: { id: string; role: string; content: string; toolName: string | null; attachments: string | null; createdAt: number }) => ({
+        data.messages.map((m) => ({
           id: m.id,
-          role: m.role as Message["role"],
+          role: m.role as BubbleMessage["role"],
           content: m.content,
           toolName: m.toolName ?? undefined,
-          attachments: m.attachments ? JSON.parse(m.attachments) : undefined,
+          attachments: m.attachments ? (JSON.parse(m.attachments) as { name: string; size: number }[]) : undefined,
           ts: m.createdAt,
         }))
       );
@@ -254,19 +282,16 @@ export function App() {
         ts: Date.now(),
       },
     ]);
-    const pending = [...pendingAttachments];
     setPendingAttachments([]);
 
     try {
       await window.kairos!.send(sessionId, text, attachments);
-      // Atualiza lista (ordem)
       const convs = await window.kairos!.conversations.list();
       setConversations(convs);
     } catch (err) {
       addSystemMessage(`Erro: ${err instanceof Error ? err.message : String(err)}`);
       setBusy(false);
     }
-    void pending; // silence unused
   }
 
   async function handleStop() {
@@ -292,34 +317,40 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-900 text-slate-100">
+    <div className="flex h-screen bg-slate-900 text-slate-100 overflow-hidden">
       {/* Sidebar */}
       {sidebarOpen && (
         <aside className="flex w-64 flex-col border-r border-slate-800 bg-slate-950">
-          <div className="border-b border-slate-800 px-4 py-3">
+          <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-3">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center text-white font-bold text-sm shadow-md">K</div>
+            <h1 className="text-sm font-semibold">Kairós</h1>
+          </div>
+          <div className="border-b border-slate-800 px-3 py-2">
             <button
               type="button"
               onClick={handleNewConversation}
-              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 transition-colors"
             >
               + Nova conversa
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto py-1">
             {conversations.length === 0 ? (
               <p className="p-4 text-xs text-slate-500 italic">Nenhuma conversa</p>
             ) : (
               conversations.map((c) => (
                 <div
                   key={c.id}
-                  className={`group flex cursor-pointer items-center justify-between border-b border-slate-900 px-3 py-2 text-sm ${
-                    c.id === sessionId ? "bg-slate-800" : "hover:bg-slate-900"
+                  className={`group flex cursor-pointer items-center justify-between px-3 py-2 text-sm transition-colors ${
+                    c.id === sessionId
+                      ? "bg-slate-800/80 border-l-2 border-emerald-500"
+                      : "hover:bg-slate-900 border-l-2 border-transparent"
                   }`}
                   onClick={() => void handleSwitchConversation(c.id)}
                 >
                   <div className="flex-1 truncate">
-                    <p className="truncate">{c.title ?? "Sem título"}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="truncate text-slate-200">{c.title ?? "Sem título"}</p>
+                    <p className="text-[10px] text-slate-500">
                       {new Date(c.updatedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
                     </p>
                   </div>
@@ -329,7 +360,7 @@ export function App() {
                       e.stopPropagation();
                       void handleDeleteConversation(c.id);
                     }}
-                    className="opacity-0 transition-opacity group-hover:opacity-100 text-slate-500 hover:text-red-400"
+                    className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-opacity text-sm"
                     aria-label="Excluir"
                   >
                     ✕
@@ -338,46 +369,48 @@ export function App() {
               ))
             )}
           </div>
+          <div className="border-t border-slate-800 px-3 py-2 text-[10px] text-slate-600">
+            <p>{toolCount} tools · v0.1.0</p>
+          </div>
         </aside>
       )}
 
       {/* Main */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col min-w-0">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-          <div className="flex items-center gap-3">
+        <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 backdrop-blur px-4 py-2.5">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="rounded-md p-1 text-slate-400 hover:bg-slate-800"
+              className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
               aria-label="Toggle sidebar"
             >
               ☰
             </button>
-            <div className="h-8 w-8 rounded-lg bg-emerald-500" aria-hidden="true" />
-            <div>
-              <h1 className="text-lg font-semibold">Kairós Desktop Alves</h1>
-              {provider && (
-                <p className="text-xs text-slate-400">
-                  {provider.provider} · {provider.modelId} · {toolCount} tools
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {busy && (
-              <button
-                type="button"
-                onClick={handleStop}
-                className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium hover:bg-red-500"
-              >
-                ⏹ Parar
-              </button>
+            {provider && (
+              <>
+                <div className={`h-8 w-8 shrink-0 rounded-lg bg-gradient-to-br ${providerColor(provider.provider)} flex items-center justify-center text-white font-bold text-sm shadow-sm`}>
+                  {provider.provider === "ollama" ? "🦙" : provider.provider[0]?.toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-100">
+                    {provider.modelId}
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    {provider.provider} · {toolCount} tools
+                  </p>
+                </div>
+              </>
             )}
+          </div>
+          <div className="flex gap-1.5">
             <button
               type="button"
               onClick={() => setShowSettings(!showSettings)}
-              className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              className={`rounded-md p-2 transition-colors ${
+                showSettings ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+              }`}
               aria-label="Configurações"
             >
               ⚙️
@@ -385,105 +418,114 @@ export function App() {
           </div>
         </header>
 
-        {/* Settings */}
+        {/* Settings Panel */}
         {showSettings && provider && (
           <div className="border-b border-slate-800 bg-slate-950 px-6 py-4">
-            <h2 className="mb-2 text-sm font-semibold text-slate-300">Provider</h2>
-            <div className="grid grid-cols-3 gap-3">
-              <select
-                value={provider.provider}
-                onChange={(e) =>
-                  handleProviderChange({ ...provider, provider: e.target.value as ProviderConfig["provider"] })
-                }
-                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-              >
-                <option value="openrouter">openrouter</option>
-                <option value="ollama">🦙 ollama (local)</option>
-                <option value="openai">openai</option>
-                <option value="anthropic">anthropic</option>
-                <option value="minimax">minimax</option>
-              </select>
-              <div className="flex gap-1">
-                <input
-                  type="text"
-                  value={provider.modelId}
-                  onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
-                  placeholder={provider.provider === "ollama" ? "ex: qwen2.5:3b" : "model ID"}
-                  className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-                />
-                {provider.provider === "ollama" && (
-                  <button
-                    type="button"
-                    onClick={handleListOllama}
-                    disabled={ollamaLoading}
-                    title="Listar modelos locais do Ollama"
-                    className="rounded-md border border-slate-700 bg-slate-800 px-2 py-2 text-sm hover:bg-slate-700 disabled:opacity-50"
-                  >
-                    {ollamaLoading ? "..." : "🔄"}
-                  </button>
-                )}
+            <h2 className="mb-3 text-sm font-semibold text-slate-200">Configurações do Provider</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Provider</label>
+                <select
+                  value={provider.provider}
+                  onChange={(e) =>
+                    handleProviderChange({ ...provider, provider: e.target.value as ProviderConfig["provider"] })
+                  }
+                  className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="openrouter">openrouter</option>
+                  <option value="ollama">🦙 ollama (local)</option>
+                  <option value="openai">openai</option>
+                  <option value="anthropic">anthropic</option>
+                  <option value="minimax">minimax</option>
+                </select>
               </div>
-              <input
-                type="text"
-                value={provider.apiKey ?? ""}
-                onChange={(e) =>
-                  handleProviderChange({ ...provider, apiKey: e.target.value || undefined })
-                }
-                placeholder={provider.provider === "ollama" ? "API key (opcional, Ollama nao precisa)" : "API key"}
-                disabled={provider.provider === "ollama"}
-                className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm disabled:opacity-50"
-              />
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Modelo</label>
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    value={provider.modelId}
+                    onChange={(e) => handleProviderChange({ ...provider, modelId: e.target.value })}
+                    placeholder={provider.provider === "ollama" ? "ex: qwen2.5:3b" : "model ID"}
+                    className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                  />
+                  {provider.provider === "ollama" && (
+                    <button
+                      type="button"
+                      onClick={handleListOllama}
+                      disabled={ollamaLoading}
+                      title="Listar modelos locais do Ollama"
+                      className="rounded-md border border-slate-700 bg-slate-800 px-2.5 text-sm hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      {ollamaLoading ? "..." : "🔄"}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">API Key</label>
+                <input
+                  type="password"
+                  value={provider.apiKey ?? ""}
+                  onChange={(e) =>
+                    handleProviderChange({ ...provider, apiKey: e.target.value || undefined })
+                  }
+                  placeholder={provider.provider === "ollama" ? "opcional" : "sk-..."}
+                  disabled={provider.provider === "ollama"}
+                  className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
+                />
+              </div>
             </div>
             {provider.provider === "ollama" && ollamaModels.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1">
-                {ollamaModels.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => handleProviderChange({ ...provider, modelId: m.id })}
-                    className={`rounded-md border px-2 py-1 text-xs ${
-                      provider.modelId === m.id
-                        ? "border-emerald-500 bg-emerald-900/30 text-emerald-300"
-                        : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
-                    }`}
-                    title={`${m.parameter_size ?? ""} ${m.quantization_level ?? ""} • ${(m.size / 1e9).toFixed(1)} GB`}
-                  >
-                    {m.id}
-                  </button>
-                ))}
+              <div className="mt-3">
+                <p className="text-[11px] text-slate-400 mb-1.5">Modelos instalados:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {ollamaModels.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => handleProviderChange({ ...provider, modelId: m.id })}
+                      className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                        provider.modelId === m.id
+                          ? "border-emerald-500 bg-emerald-900/30 text-emerald-300"
+                          : "border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                      title={`${m.parameter_size ?? ""} ${m.quantization_level ?? ""} • ${(m.size / 1e9).toFixed(1)} GB`}
+                    >
+                      {m.id}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {provider.provider === "ollama" && ollamaModels.length === 0 && !ollamaLoading && (
-              <p className="mt-2 text-xs text-slate-500">
-                Ollama nao esta rodando ou nao tem modelos. Inicie com{" "}
+              <p className="mt-3 text-[11px] text-slate-500">
+                Ollama não está rodando ou não tem modelos. Inicie com{" "}
                 <code className="rounded bg-slate-800 px-1.5 py-0.5 text-emerald-400">ollama serve</code>{" "}
-                e depois clique 🔄.
+                e clique 🔄.
               </p>
             )}
           </div>
         )}
 
         {/* Conversation */}
-        <main className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="mx-auto max-w-3xl space-y-3">
-            {messages.length === 0 && (
-              <div className="py-12 text-center text-slate-500">
-                <p className="text-2xl">O que você quer que eu faça?</p>
-                <p className="mt-2 text-sm">
-                  {toolCount} tools — arquivos, planilhas, PDFs, Word, imagens, vídeo.
-                </p>
-              </div>
-            )}
-            {messages.map((m) => (
-              <MessageBubble key={m.id} msg={m} />
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
+        <main className="flex-1 overflow-y-auto">
+          {messages.length === 0 ? (
+            <EmptyState toolCount={toolCount} onPick={(p) => setDraft(p)} />
+          ) : (
+            <div className="mx-auto max-w-3xl px-4 py-6">
+              {messages.map((m) => (
+                <MessageBubble key={m.id} msg={m} />
+              ))}
+              {busy && messages[messages.length - 1]?.role !== "assistant" && <TypingIndicator />}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
         </main>
 
         {/* Pending attachments */}
         {pendingAttachments.length > 0 && (
-          <div className="border-t border-slate-800 bg-slate-950 px-6 py-2">
+          <div className="border-t border-slate-800 bg-slate-950/80 px-4 py-2 backdrop-blur">
             <div className="mx-auto flex max-w-3xl flex-wrap gap-2">
               {pendingAttachments.map((a, i) => (
                 <div
@@ -506,43 +548,16 @@ export function App() {
         )}
 
         {/* Input */}
-        <footer className="border-t border-slate-800 px-6 py-4">
-          <form
-            className="mx-auto flex max-w-3xl items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleSend();
-            }}
-          >
-            <button
-              type="button"
-              onClick={handleAttach}
-              className="rounded-md p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
-              aria-label="Anexar arquivo"
-              disabled={busy}
-            >
-              📎
-            </button>
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="O que você quer fazer?"
-              className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-4 py-2 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
-              disabled={busy}
-            />
-            <button
-              type="submit"
-              className="rounded-md bg-emerald-500 px-4 py-2 font-semibold text-slate-900 hover:bg-emerald-400 disabled:opacity-50"
-              disabled={busy || (!draft.trim() && pendingAttachments.length === 0)}
-            >
-              {busy ? "..." : "➤"}
-            </button>
-          </form>
-        </footer>
+        <InputBar
+          value={draft}
+          onChange={setDraft}
+          onSend={() => void handleSend()}
+          onStop={() => void handleStop()}
+          busy={busy}
+        />
       </div>
 
-      {/* Modal de permissão (Sprint 1.5) */}
+      {/* Permission modal */}
       {permissionRequest && (
         <PermissionModal
           request={permissionRequest}
@@ -553,22 +568,6 @@ export function App() {
   );
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-}
-
-/**
- * Modal de confirmação para tools destrutivas (Sprint 1.5).
- *
- * Mostra:
- *   - Tool sendo chamada
- *   - Prompt amigável
- *   - Argumentos formatados em JSON
- *   - Botões Permitir (verde) / Negar (vermelho)
- *   - Esc = nega, Enter = aprova
- */
 function PermissionModal({
   request,
   onRespond,
@@ -576,7 +575,6 @@ function PermissionModal({
   request: PermissionRequest;
   onRespond: (approved: boolean) => void;
 }) {
-  // Esc = nega, Enter = aprova
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -601,24 +599,20 @@ function PermissionModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="perm-title"
     >
-      <div className="w-full max-w-lg rounded-xl border border-amber-500/40 bg-slate-900 p-6 shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-amber-500/40 bg-slate-900 p-6 shadow-2xl">
         <div className="mb-4 flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400">
-            <span className="text-2xl" aria-hidden="true">⚠️</span>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400 text-2xl">
+            ⚠️
           </div>
           <div className="flex-1">
-            <h2 id="perm-title" className="text-lg font-semibold text-slate-100">
-              Ação requer confirmação
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-100">Ação requer confirmação</h2>
             <p className="mt-1 text-sm text-slate-400">{request.prompt}</p>
           </div>
         </div>
-
         <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
           <div className="mb-2 flex items-center gap-2 text-xs">
             <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-emerald-300">
@@ -631,7 +625,6 @@ function PermissionModal({
             {argsStr}
           </pre>
         </div>
-
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -650,47 +643,6 @@ function PermissionModal({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MessageBubble({ msg }: { msg: Message }) {
-  const base = "max-w-[85%] rounded-lg px-4 py-2 text-sm";
-  if (msg.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className={`${base} bg-emerald-600 text-white`}>
-          {msg.attachments && msg.attachments.length > 0 && (
-            <div className="mb-1 flex flex-wrap gap-1 text-xs opacity-80">
-              {msg.attachments.map((a, i) => (
-                <span key={i}>📎 {a.name}</span>
-              ))}
-            </div>
-          )}
-          {msg.content}
-        </div>
-      </div>
-    );
-  }
-  if (msg.role === "assistant") {
-    return (
-      <div className="flex justify-start">
-        <div className={`${base} bg-slate-800 text-slate-100 whitespace-pre-wrap`}>{msg.content || "..."}</div>
-      </div>
-    );
-  }
-  if (msg.role === "tool") {
-    return (
-      <div className="flex justify-start">
-        <div className="bg-slate-800/50 text-xs text-slate-400 italic px-3 py-1 rounded">
-          {msg.content}
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex justify-center">
-      <div className="text-xs text-slate-500 italic">{msg.content}</div>
     </div>
   );
 }

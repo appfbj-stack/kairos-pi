@@ -83,8 +83,12 @@
     "@kairos/extension-pdf-create": "workspace:*",
     "@kairos/extension-spreadsheets": "workspace:*",
     "@kairos/extension-video": "workspace:*",
+    "highlight.js": "^11.12.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.17",
